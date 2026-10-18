@@ -1,0 +1,155 @@
+name: Windows RDP Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      windows_version:
+        description: 'Windows OS Version'
+        required: false
+        default: 'windows-2022'
+      ram_size:
+        description: 'RAM Configuration'
+        required: false
+        default: '16GB'
+      ngrok_token:
+        description: 'Ngrok Auth Token'
+        required: false
+        default: ''
+
+jobs:
+  rdp-setup:
+    runs-on: ${{ inputs.windows_version != '' && inputs.windows_version || 'windows-2022' }}
+    timeout-minutes: 360 # GitHub Free max runtime is 6 hours
+    steps:
+      - name: Download and extract Ngrok v3
+        shell: pwsh
+        run: |
+          Invoke-WebRequest "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile ngrok.zip
+          Expand-Archive ngrok.zip -DestinationPath .
+          Remove-Item ngrok.zip
+
+      - name: Optimize Disk and Configure RAM
+        shell: pwsh
+        run: |
+          $ramChoice = "${{ inputs.ram_size }}"
+          Write-Output "[*] Target RAM Configuration: $ramChoice"
+          
+          if ($ramChoice -eq "32GB" -or $ramChoice -eq "64GB") {
+            $pageMB = if ($ramChoice -eq "64GB") { 57344 } else { 24576 }
+            try {
+              Set-CimInstance -Query "Select * from Win32_ComputerSystem" -Property @{AutomaticManagedPagefile = $false} -ErrorAction SilentlyContinue
+              Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' -Name 'PagingFiles' -Value @("C:\pagefile.sys $pageMB $pageMB") -ErrorAction SilentlyContinue
+              Write-Output "[+] Virtual memory pagefile configured for $pageMB MB"
+            } catch {}
+          }
+          
+          # Clean caches to maximize SSD free space
+          Remove-Item -Recurse -Force "C:\\hostedtoolcache" -ErrorAction SilentlyContinue
+          
+          $freeGB = [Math]::Round((Get-PSDrive C).Free / 1GB, 1)
+          Write-Output "[+] Free SSD Space on C:: $freeGB GB"
+
+      - name: Enable RDP and Firewall
+        shell: pwsh
+        run: |
+          Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server" -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp" -Name "UserAuthentication" -Value 0 -Force
+          Set-Service -Name "TermService" -StartupType Automatic
+          Start-Service -Name "TermService"
+          netsh advfirewall firewall add rule name="Allow-RDP" dir=in action=allow protocol=TCP localport=3389
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          New-NetFirewallRule -DisplayName "RDP-3389" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 3389 -ErrorAction SilentlyContinue
+
+      - name: Create Admin User
+        shell: pwsh
+        run: |
+          secedit /export /cfg C:\\secpol.cfg
+          (Get-Content C:\\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0").replace("MinimumPasswordLength = 8", "MinimumPasswordLength = 0") | Set-Content C:\\secpol.cfg
+          secedit /configure /db C:\\windows\\security\\local.sdb /cfg C:\\secpol.cfg /areas SECURITYPOLICY
+          Remove-Item -Force C:\\secpol.cfg -ErrorAction SilentlyContinue
+
+          cmd.exe /c "net user Fazah Fazah@123 /add /expires:never /active:yes"
+          cmd.exe /c "net localgroup Administrators Fazah /add"
+          cmd.exe /c "net localgroup `"Remote Desktop Users`" Fazah /add"
+
+      - name: Configure and Start Ngrok Tunnel
+        shell: pwsh
+        env:
+          DEFAULT_NGROK: ${{ secrets.NGROK_AUTH_TOKEN }}
+        run: |
+          $tok = "${{ inputs.ngrok_token }}"
+          if (-not $tok) { $tok = $env:DEFAULT_NGROK }
+
+          Copy-Item .\\ngrok.exe C:\\Windows\\System32\\ngrok.exe -Force
+
+          # Write ngrok config
+          @(
+            'version: "2"',
+            "authtoken: $tok",
+            'tunnels:',
+            '  rdp:',
+            '    proto: tcp',
+            '    addr: 3389'
+          ) | Out-File -FilePath "C:\\ngrok.yml" -Encoding ascii
+
+          # Start ngrok as background process (compatible with Windows 2022/2025)
+          $ngrokProc = Start-Process -FilePath "C:\\Windows\\System32\\ngrok.exe" `
+            -ArgumentList "start rdp --config C:\\ngrok.yml" `
+            -NoNewWindow -PassThru
+          Write-Output "[+] Ngrok started with PID: $($ngrokProc.Id)"
+
+          # Wait for tunnel to become available (up to 2 minutes)
+          $tunnelUrl = $null
+          $timeout = 40
+          while ($timeout -gt 0 -and -not $tunnelUrl) {
+            Start-Sleep -Seconds 3
+            try {
+              $response = Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels" -ErrorAction Stop
+              $tcp = $response.tunnels | Where-Object { $_.proto -eq "tcp" } | Select-Object -First 1
+              if ($tcp) {
+                $tunnelUrl = $tcp.public_url -replace "^tcp://", ""
+              }
+            } catch {}
+            $timeout--
+          }
+
+          if (-not $tunnelUrl) {
+            Write-Output "::error::Ngrok tunnel could not be established"
+            exit 1
+          }
+
+          Write-Output "TUNNEL_HOST=$tunnelUrl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Output "[+] Tunnel established: $tunnelUrl"
+
+      - name: Build and Upload .rdp Artifact
+        shell: pwsh
+        run: |
+          @(
+            "full address:s:${{ env.TUNNEL_HOST }}",
+            "username:s:Fazah",
+            "prompt for credentials:i:1",
+            "authentication level:i:2",
+            "screen mode id:i:2",
+            "desktopwidth:i:1920",
+            "desktopheight:i:1080",
+            "redirectclipboard:i:1"
+          ) | Out-File -FilePath rdp-connection.rdp -Encoding ascii
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdp-connection
+          path: rdp-connection.rdp
+          retention-days: 1
+
+      - name: Keep Alive Session
+        shell: pwsh
+        run: |
+          Write-Output "[+] RDP is now live! Keeping runner alive..."
+          while ($true) { Start-Sleep -Seconds 300 }
+
+      - name: Cleanup Ngrok
+        if: always()
+        shell: pwsh
+        run: |
+          Stop-Process -Name "ngrok" -Force -ErrorAction SilentlyContinue
