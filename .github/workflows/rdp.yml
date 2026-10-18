@@ -15,6 +15,10 @@ on:
         description: 'Ngrok Auth Token'
         required: false
         default: ''
+      ngrok_region:
+        description: 'Ngrok Region'
+        required: false
+        default: 'eu'
 
 jobs:
   rdp-setup:
@@ -27,7 +31,7 @@ jobs:
           Invoke-WebRequest "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile ngrok.zip
           Expand-Archive ngrok.zip -DestinationPath .
           Remove-Item ngrok.zip
-          Copy-Item .\\ngrok.exe C:\\Windows\\System32\\ngrok.exe -Force
+          Copy-Item .\ngrok.exe C:\Windows\System32\ngrok.exe -Force
 
       - name: Optimize Disk and Configure RAM
         shell: pwsh
@@ -39,13 +43,13 @@ jobs:
             $pageMB = if ($ramChoice -eq "64GB") { 57344 } else { 24576 }
             try {
               Set-CimInstance -Query "Select * from Win32_ComputerSystem" -Property @{AutomaticManagedPagefile = $false} -ErrorAction SilentlyContinue
-              Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management' -Name 'PagingFiles' -Value @("C:\\pagefile.sys $pageMB $pageMB") -ErrorAction SilentlyContinue
+              Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' -Name 'PagingFiles' -Value @("C:\pagefile.sys $pageMB $pageMB") -ErrorAction SilentlyContinue
               Write-Output "[+] Virtual memory pagefile configured for $pageMB MB"
             } catch {}
           }
           
           # Clean caches to maximize SSD free space
-          Remove-Item -Recurse -Force "C:\\hostedtoolcache" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\hostedtoolcache" -ErrorAction SilentlyContinue
           
           $freeGB = [Math]::Round((Get-PSDrive C).Free / 1GB, 1)
           Write-Output "[+] Free SSD Space on C:: $freeGB GB"
@@ -54,9 +58,9 @@ jobs:
         shell: pwsh
         run: |
           # Configure Remote Desktop in Registry
-          Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server" -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp" -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp" -Name "PortNumber" -Value 3389 -Force
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "PortNumber" -Value 3389 -Force
           
           # Configure and Restart TermService to apply fDenyTSConnections = 0 (critical for Windows Server 2022)
           Set-Service -Name "TermService" -StartupType Automatic
@@ -88,10 +92,10 @@ jobs:
       - name: Create Admin User
         shell: pwsh
         run: |
-          secedit /export /cfg C:\\secpol.cfg
-          (Get-Content C:\\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0").replace("MinimumPasswordLength = 8", "MinimumPasswordLength = 0") | Set-Content C:\\secpol.cfg
-          secedit /configure /db C:\\windows\\security\\local.sdb /cfg C:\\secpol.cfg /areas SECURITYPOLICY
-          Remove-Item -Force C:\\secpol.cfg -ErrorAction SilentlyContinue
+          secedit /export /cfg C:\secpol.cfg
+          (Get-Content C:\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0").replace("MinimumPasswordLength = 8", "MinimumPasswordLength = 0") | Set-Content C:\secpol.cfg
+          secedit /configure /db C:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
+          Remove-Item -Force C:\secpol.cfg -ErrorAction SilentlyContinue
 
           cmd.exe /c "net user Fazah Fazah@123 /add /expires:never /active:yes"
           cmd.exe /c "net localgroup Administrators Fazah /add"
@@ -106,21 +110,24 @@ jobs:
         run: |
           $tok = "${{ inputs.ngrok_token }}"
           if (-not $tok) { $tok = $env:DEFAULT_NGROK }
+          $reg = "${{ inputs.ngrok_region }}"
+          if (-not $reg -or $reg -eq "gb") { $reg = "eu" }
 
-          # Write ngrok config with explicit IPv4 localhost binding
+          # Write ngrok config with explicit IPv4 localhost binding and region
           @(
             'version: "2"',
             "authtoken: $tok",
+            "region: $reg",
             'tunnels:',
             '  rdp:',
             '    proto: tcp',
             '    addr: 127.0.0.1:3389'
-          ) | Out-File -FilePath "C:\\ngrok.yml" -Encoding ascii
+          ) | Out-File -FilePath "C:\ngrok.yml" -Encoding ascii
 
           # Install and start Ngrok as native Windows Service so it survives across all steps
           Write-Output "[*] Installing Ngrok Windows Service..."
-          C:\\Windows\\System32\\ngrok.exe service install --config="C:\\ngrok.yml"
-          C:\\Windows\\System32\\ngrok.exe service start
+          C:\Windows\System32\ngrok.exe service install --config="C:\ngrok.yml"
+          C:\Windows\System32\ngrok.exe service start
 
           # Wait for tunnel to become available via local API (up to 40s)
           $tunnelUrl = $null
@@ -186,5 +193,5 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          C:\\Windows\\System32\\ngrok.exe service stop -ErrorAction SilentlyContinue
-          C:\\Windows\\System32\\ngrok.exe service uninstall -ErrorAction SilentlyContinue
+          C:\Windows\System32\ngrok.exe service stop -ErrorAction SilentlyContinue
+          C:\Windows\System32\ngrok.exe service uninstall -ErrorAction SilentlyContinue
