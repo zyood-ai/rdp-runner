@@ -61,7 +61,15 @@ jobs:
           # Configure Remote Desktop in Registry
           Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server" -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp" -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp" -Name "SecurityLayer" -Value 1 -Force
+          Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp" -Name "fPromptForPassword" -Value 0 -Force
           Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp" -Name "PortNumber" -Value 3389 -Force
+          
+          # Disable UDP and allow NTLM fallback for tunnel connections (prevents session drop)
+          New-Item -Path "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services" -Force -ErrorAction SilentlyContinue | Out-Null
+          Set-ItemProperty -Path "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services" -Name "fDisableUDP" -Value 1 -Force -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa" -Name "LmCompatibilityLevel" -Value 2 -Force -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\LanmanWorkstation\\Parameters" -Name "BlockNTLM" -Value 0 -Force -ErrorAction SilentlyContinue
           
           # Configure and Restart TermService to apply fDenyTSConnections = 0
           Set-Service -Name "TermService" -StartupType Automatic
@@ -158,7 +166,11 @@ jobs:
             "full address:s:${{ env.TUNNEL_HOST }}",
             "username:s:Fazah",
             "prompt for credentials:i:1",
-            "authentication level:i:2",
+            "administrative session:i:1",
+            "authentication level:i:0",
+            "enablecredsspsupport:i:0",
+            "autoreconnection enabled:i:1",
+            "smart sizing:i:1",
             "screen mode id:i:2",
             "desktopwidth:i:1920",
             "desktopheight:i:1080",
