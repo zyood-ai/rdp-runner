@@ -1,10 +1,10 @@
-name: Windows RDP Runner
+name: Cloud Server Runner (RDP and VPS)
 
 on:
   workflow_dispatch:
     inputs:
       windows_version:
-        description: 'Windows OS Version'
+        description: 'Server OS (Windows or Ubuntu)'
         required: false
         default: 'windows-2022'
       ram_size:
@@ -22,6 +22,7 @@ on:
 
 jobs:
   rdp-setup:
+    if: "!startsWith(inputs.windows_version, 'ubuntu')"
     runs-on: ${{ inputs.windows_version != '' && inputs.windows_version || 'windows-2022' }}
     timeout-minutes: 360 # GitHub Free max runtime is 6 hours
     steps:
@@ -62,7 +63,7 @@ jobs:
           Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp" -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp" -Name "PortNumber" -Value 3389 -Force
           
-          # Configure and Restart TermService to apply fDenyTSConnections = 0 (critical for Windows Server 2022)
+          # Configure and Restart TermService to apply fDenyTSConnections = 0
           Set-Service -Name "TermService" -StartupType Automatic
           Restart-Service -Name "TermService" -Force
           
@@ -113,7 +114,6 @@ jobs:
           $reg = "${{ inputs.ngrok_region }}"
           if (-not $reg -or $reg -eq "gb") { $reg = "eu" }
 
-          # Write ngrok config with explicit IPv4 localhost binding and region
           @(
             'version: "2"',
             "authtoken: $tok",
@@ -124,12 +124,10 @@ jobs:
             '    addr: 127.0.0.1:3389'
           ) | Out-File -FilePath "C:\\ngrok.yml" -Encoding ascii
 
-          # Install and start Ngrok as native Windows Service so it survives across all steps
           Write-Output "[*] Installing Ngrok Windows Service..."
           C:\\Windows\\System32\\ngrok.exe service install --config="C:\\ngrok.yml"
           C:\\Windows\\System32\\ngrok.exe service start
 
-          # Wait for tunnel to become available via local API (up to 40s)
           $tunnelUrl = $null
           $timeout = 20
           while ($timeout -gt 0 -and -not $tunnelUrl) {
@@ -144,14 +142,14 @@ jobs:
             $timeout--
           }
 
-          if (-not $tunnelUrl) {
-            Write-Output "::error::Ngrok tunnel could not be established"
+          if ($tunnelUrl) {
+            Write-Output "[+] RDP Public Address: $tunnelUrl"
+            echo "tunnel_url=$tunnelUrl" >> $env:GITHUB_OUTPUT
+            echo "TUNNEL_HOST=$tunnelUrl" >> $env:GITHUB_ENV
+          } else {
+            Write-Output "[!] Failed to get tunnel URL within timeout."
             exit 1
           }
-
-          Write-Output "TUNNEL_HOST=$tunnelUrl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Output "tunnel_url=$tunnelUrl" >> $env:GITHUB_OUTPUT
-          Write-Output "[+] Tunnel established successfully: $tunnelUrl"
 
       - name: Build and Upload .rdp Artifact
         shell: pwsh
@@ -195,3 +193,69 @@ jobs:
         run: |
           C:\\Windows\\System32\\ngrok.exe service stop -ErrorAction SilentlyContinue
           C:\\Windows\\System32\\ngrok.exe service uninstall -ErrorAction SilentlyContinue
+
+  vps-setup:
+    if: "startsWith(inputs.windows_version, 'ubuntu')"
+    runs-on: ${{ inputs.windows_version != '' && inputs.windows_version || 'ubuntu-latest' }}
+    timeout-minutes: 360 # GitHub Free max runtime is 6 hours
+    steps:
+      - name: Install and Extract Ngrok v3
+        run: |
+          curl -s https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz | sudo tar -C /usr/local/bin -xz
+          sudo chmod +x /usr/local/bin/ngrok
+
+      - name: Configure Root and SSH Authentication
+        run: |
+          echo "root:Fazah@123" | sudo chpasswd
+          echo "runner:Fazah@123" | sudo chpasswd
+          sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/PermitRootLogin no/PermitRootLogin yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          sudo systemctl restart ssh || sudo service ssh restart
+
+      - name: Configure and Start Ngrok SSH Tunnel
+        id: ngrok-tunnel
+        run: |
+          tok="${{ inputs.ngrok_token }}"
+          reg="${{ inputs.ngrok_region }}"
+          if [ -z "$reg" ] || [ "$reg" = "gb" ]; then reg="eu"; fi
+          ngrok config add-authtoken "$tok"
+          ngrok tcp 22 --region "$reg" --log=stdout > /dev/null &
+          sleep 3
+          tunnel_url=""
+          for i in {1..25}; do
+            tunnel_url=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'tcp://[^"]*' | head -n1 | sed 's|tcp://||')
+            if [ -n "$tunnel_url" ]; then
+              break
+            fi
+            sleep 2
+          done
+          if [ -n "$tunnel_url" ]; then
+            echo "tunnel_url=$tunnel_url" >> $GITHUB_OUTPUT
+            echo "[+] SSH Tunnel URL: $tunnel_url"
+          else
+            echo "[!] Failed to get tunnel URL"
+            exit 1
+          fi
+
+      - name: Build Connection Artifact
+        run: |
+          url="${{ steps.ngrok-tunnel.outputs.tunnel_url }}"
+          echo "full address:s:$url" > rdp-connection.rdp
+          echo "username:s:runner" >> rdp-connection.rdp
+          echo "$url" >> rdp-connection.rdp
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdp-connection
+          path: rdp-connection.rdp
+          retention-days: 1
+
+      - name: Keep Alive VPS Session
+        run: |
+          echo "[+] Linux VPS SSH is live (${{ steps.ngrok-tunnel.outputs.tunnel_url }})! Keeping session active..."
+          while true; do
+            sleep 120
+          done
