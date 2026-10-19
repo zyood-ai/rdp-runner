@@ -32,7 +32,7 @@ jobs:
           Invoke-WebRequest "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile ngrok.zip
           Expand-Archive ngrok.zip -DestinationPath .
           Remove-Item ngrok.zip
-          Copy-Item .\\ngrok.exe C:\\Windows\\System32\\ngrok.exe -Force
+          Copy-Item .\ngrok.exe C:\Windows\System32\ngrok.exe -Force
 
       - name: Optimize Disk and Configure RAM
         shell: pwsh
@@ -44,13 +44,13 @@ jobs:
             $pageMB = if ($ramChoice -eq "64GB") { 57344 } else { 24576 }
             try {
               Set-CimInstance -Query "Select * from Win32_ComputerSystem" -Property @{AutomaticManagedPagefile = $false} -ErrorAction SilentlyContinue
-              Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management' -Name 'PagingFiles' -Value @("C:\\pagefile.sys $pageMB $pageMB") -ErrorAction SilentlyContinue
+              Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' -Name 'PagingFiles' -Value @("C:\pagefile.sys $pageMB $pageMB") -ErrorAction SilentlyContinue
               Write-Output "[+] Virtual memory pagefile configured for $pageMB MB"
             } catch {}
           }
           
           # Clean caches to maximize SSD free space
-          Remove-Item -Recurse -Force "C:\\hostedtoolcache" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\hostedtoolcache" -ErrorAction SilentlyContinue
           
           $freeGB = [Math]::Round((Get-PSDrive C).Free / 1GB, 1)
           Write-Output "[+] Free SSD Space on C:: $freeGB GB"
@@ -59,17 +59,17 @@ jobs:
         shell: pwsh
         run: |
           # Configure Remote Desktop in Registry
-          Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server" -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp" -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp" -Name "SecurityLayer" -Value 1 -Force
-          Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp" -Name "fPromptForPassword" -Value 0 -Force
-          Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp" -Name "PortNumber" -Value 3389 -Force
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "SecurityLayer" -Value 1 -Force
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "fPromptForPassword" -Value 0 -Force
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "PortNumber" -Value 3389 -Force
           
           # Disable UDP and allow NTLM fallback for tunnel connections (prevents session drop)
-          New-Item -Path "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services" -Force -ErrorAction SilentlyContinue | Out-Null
-          Set-ItemProperty -Path "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services" -Name "fDisableUDP" -Value 1 -Force -ErrorAction SilentlyContinue
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa" -Name "LmCompatibilityLevel" -Value 2 -Force -ErrorAction SilentlyContinue
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\LanmanWorkstation\\Parameters" -Name "BlockNTLM" -Value 0 -Force -ErrorAction SilentlyContinue
+          New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" -Force -ErrorAction SilentlyContinue | Out-Null
+          Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" -Name "fDisableUDP" -Value 1 -Force -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "LmCompatibilityLevel" -Value 2 -Force -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters" -Name "BlockNTLM" -Value 0 -Force -ErrorAction SilentlyContinue
           
           # Configure and Restart TermService to apply fDenyTSConnections = 0
           Set-Service -Name "TermService" -StartupType Automatic
@@ -101,10 +101,10 @@ jobs:
       - name: Create Admin User
         shell: pwsh
         run: |
-          secedit /export /cfg C:\\secpol.cfg
-          (Get-Content C:\\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0").replace("MinimumPasswordLength = 8", "MinimumPasswordLength = 0") | Set-Content C:\\secpol.cfg
-          secedit /configure /db C:\\windows\\security\\local.sdb /cfg C:\\secpol.cfg /areas SECURITYPOLICY
-          Remove-Item -Force C:\\secpol.cfg -ErrorAction SilentlyContinue
+          secedit /export /cfg C:\secpol.cfg
+          (Get-Content C:\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0").replace("MinimumPasswordLength = 8", "MinimumPasswordLength = 0") | Set-Content C:\secpol.cfg
+          secedit /configure /db C:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
+          Remove-Item -Force C:\secpol.cfg -ErrorAction SilentlyContinue
 
           cmd.exe /c "net user Fazah Fazah@123 /add /expires:never /active:yes"
           cmd.exe /c "net localgroup Administrators Fazah /add"
@@ -130,11 +130,11 @@ jobs:
             '  rdp:',
             '    proto: tcp',
             '    addr: 127.0.0.1:3389'
-          ) | Out-File -FilePath "C:\\ngrok.yml" -Encoding ascii
+          ) | Out-File -FilePath "C:\ngrok.yml" -Encoding ascii
 
           Write-Output "[*] Installing Ngrok Windows Service..."
-          C:\\Windows\\System32\\ngrok.exe service install --config="C:\\ngrok.yml"
-          C:\\Windows\\System32\\ngrok.exe service start
+          C:\Windows\System32\ngrok.exe service install --config="C:\ngrok.yml"
+          C:\Windows\System32\ngrok.exe service start
 
           $tunnelUrl = $null
           $timeout = 20
@@ -203,8 +203,8 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          C:\\Windows\\System32\\ngrok.exe service stop -ErrorAction SilentlyContinue
-          C:\\Windows\\System32\\ngrok.exe service uninstall -ErrorAction SilentlyContinue
+          C:\Windows\System32\ngrok.exe service stop -ErrorAction SilentlyContinue
+          C:\Windows\System32\ngrok.exe service uninstall -ErrorAction SilentlyContinue
 
   vps-setup:
     if: "!startsWith(inputs.windows_version, 'windows') && inputs.windows_version != ''"
@@ -234,12 +234,60 @@ jobs:
           curl -s https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz | sudo tar -C /usr/local/bin -xz
           sudo chmod +x /usr/local/bin/ngrok
 
-      - name: Configure Multi-Distro Root and SSH Environment
+      - name: Configure Root, SSH and GUI Desktop Environments
         run: |
           TARGET_OS="${{ inputs.windows_version }}"
-          echo "[*] Setting up VPS environment for: $TARGET_OS"
+          reg="${{ inputs.ngrok_region }}"
+          if [ -z "$reg" ] || [ "$reg" = "gb" ]; then reg="eu"; fi
+          tok="${{ inputs.ngrok_token }}"
+          if [ -z "$tok" ]; then tok="${{ secrets.NGROK_AUTH_TOKEN }}"; fi
+          ngrok config add-authtoken "$tok"
           
-          if [[ "$TARGET_OS" =~ ^ubuntu ]]; then
+          echo "[*] Setting up environment for OS: $TARGET_OS"
+          
+          # Check if GUI Desktop (XRDP on port 3389)
+          if [[ "$TARGET_OS" =~ -gui$ ]] || [ "$TARGET_OS" = "android-cloud" ]; then
+            echo "[+] Configuring Linux GUI Desktop (XRDP on Port 3389)..."
+            sudo apt-get update
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xfce4 xfce4-goodies xrdp dbus-x11 x11-xserver-utils
+            
+            echo "xfce4-session" > /home/runner/.xsession
+            sudo chown runner:runner /home/runner/.xsession
+            echo "runner:Fazah@123" | sudo chpasswd
+            echo "root:Fazah@123" | sudo chpasswd
+            sudo adduser xrdp ssl-cert
+            
+            if [ "$TARGET_OS" = "kali-gui" ]; then
+              echo "[*] Adding Kali Security Tools & Theme..."
+              sudo apt-get install -y nmap wireshark tshark aircrack-ng hydra john sqlmap curl wget nano || true
+              sudo mkdir -p /usr/share/backgrounds/
+              curl -s -L "https://gitlab.com/kalilinux/packages/kali-wallpapers/-/raw/kali/master/backgrounds/kali-dragon-16x9.png" -o /usr/share/backgrounds/kali.png || true
+            elif [ "$TARGET_OS" = "parrot-gui" ]; then
+              echo "[*] Adding Parrot Security Tools..."
+              sudo apt-get install -y nmap sqlmap wireshark nikto dirb netcat-traditional curl wget || true
+            elif [ "$TARGET_OS" = "android-cloud" ]; then
+              echo "[*] Configuring Android Emulation Tools..."
+              sudo apt-get install -y adb fastboot scrcpy openjdk-17-jdk curl wget || true
+            fi
+            
+            sudo systemctl restart xrdp
+            TARGET_PORT=3389
+            
+          elif [ "$TARGET_OS" = "ai-dev" ]; then
+            echo "[+] Configuring AI & Data Science Environment..."
+            echo "root:Fazah@123" | sudo chpasswd
+            echo "runner:Fazah@123" | sudo chpasswd
+            sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+            sudo sed -i 's/PermitRootLogin no/PermitRootLogin yes/' /etc/ssh/sshd_config
+            sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+            sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+            sudo systemctl restart ssh || sudo service ssh restart
+            sudo apt-get update && sudo apt-get install -y python3-pip python3-venv git curl
+            python3 -m pip install --break-system-packages torch torchvision torchaudio jupyterlab pandas numpy || true
+            nohup jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --NotebookApp.token='Fazah@123' > /dev/null 2>&1 &
+            TARGET_PORT=22
+            
+          elif [[ "$TARGET_OS" =~ ^ubuntu ]]; then
             echo "[+] Configuring Native Ubuntu host SSH..."
             echo "root:Fazah@123" | sudo chpasswd
             echo "runner:Fazah@123" | sudo chpasswd
@@ -248,6 +296,8 @@ jobs:
             sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
             sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
             sudo systemctl restart ssh || sudo service ssh restart
+            TARGET_PORT=22
+            
           else
             echo "[+] Configuring Containerized $TARGET_OS environment..."
             sudo systemctl stop ssh || sudo service ssh stop
@@ -276,26 +326,30 @@ jobs:
             
             echo "[*] Starting $DOCKER_IMG container on host port 22..."
             docker run -d --name vps --privileged -p 22:22 "$DOCKER_IMG" sh -c "$SETUP_CMD"
+            TARGET_PORT=22
           fi
           
-          # Wait for SSH port 22 to respond
-          echo "[*] Waiting for SSH service to listen on 127.0.0.1:22..."
+          # Wait for target port to be active
+          echo "[*] Waiting for service on port $TARGET_PORT..."
           for i in {1..30}; do
-            if nc -z 127.0.0.1 22 2>/dev/null || (exec 3<>/dev/tcp/127.0.0.1/22) 2>/dev/null; then
-              echo "[+] SSH Service is LIVE on port 22!"
+            if nc -z 127.0.0.1 $TARGET_PORT 2>/dev/null || (exec 3<>/dev/tcp/127.0.0.1/$TARGET_PORT) 2>/dev/null; then
+              echo "[+] Service is LIVE on port $TARGET_PORT!"
               break
             fi
             sleep 1
           done
+          
+          echo "TARGET_PORT=$TARGET_PORT" >> $GITHUB_ENV
 
-      - name: Configure and Start Ngrok SSH Tunnel
+      - name: Configure and Start Ngrok Tunnel
         id: ngrok-tunnel
         run: |
-          tok="${{ inputs.ngrok_token }}"
           reg="${{ inputs.ngrok_region }}"
           if [ -z "$reg" ] || [ "$reg" = "gb" ]; then reg="eu"; fi
-          ngrok config add-authtoken "$tok"
-          ngrok tcp 22 --region "$reg" --log=stdout > /dev/null &
+          port="${{ env.TARGET_PORT }}"
+          if [ -z "$port" ]; then port=22; fi
+          echo "[*] Starting Ngrok TCP tunnel for port $port on region $reg..."
+          ngrok tcp "$port" --region "$reg" --log=stdout > /dev/null &
           sleep 3
           tunnel_url=""
           for i in {1..25}; do
@@ -307,7 +361,7 @@ jobs:
           done
           if [ -n "$tunnel_url" ]; then
             echo "tunnel_url=$tunnel_url" >> $GITHUB_OUTPUT
-            echo "[+] SSH Tunnel URL: $tunnel_url"
+            echo "[+] Tunnel URL: $tunnel_url"
           else
             echo "[!] Failed to get tunnel URL"
             exit 1
@@ -316,9 +370,25 @@ jobs:
       - name: Build Connection Artifact
         run: |
           url="${{ steps.ngrok-tunnel.outputs.tunnel_url }}"
-          echo "full address:s:$url" > rdp-connection.rdp
-          echo "username:s:runner" >> rdp-connection.rdp
-          echo "$url" >> rdp-connection.rdp
+          port="${{ env.TARGET_PORT }}"
+          user_name="runner"
+          if [[ "${{ inputs.windows_version }}" =~ ^windows ]]; then user_name="Fazah"; fi
+          
+          cat << EOF > rdp-connection.rdp
+full address:s:$url
+username:s:$user_name
+prompt for credentials:i:1
+administrative session:i:1
+authentication level:i:0
+enablecredsspsupport:i:0
+autoreconnection enabled:i:1
+smart sizing:i:1
+screen mode id:i:2
+desktopwidth:i:1920
+desktopheight:i:1080
+redirectclipboard:i:1
+$url
+EOF
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -327,9 +397,9 @@ jobs:
           path: rdp-connection.rdp
           retention-days: 1
 
-      - name: Keep Alive VPS Session
+      - name: Keep Alive Session
         run: |
-          echo "[+] Linux VPS SSH is live (${{ steps.ngrok-tunnel.outputs.tunnel_url }})! Keeping session active..."
+          echo "[+] Server session is live (${{ steps.ngrok-tunnel.outputs.tunnel_url }})! Keeping session active..."
           while true; do
             sleep 120
           done
