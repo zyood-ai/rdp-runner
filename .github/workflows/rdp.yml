@@ -22,7 +22,7 @@ on:
 
 jobs:
   rdp-setup:
-    if: "!startsWith(inputs.windows_version, 'ubuntu')"
+    if: "startsWith(inputs.windows_version, 'windows') || inputs.windows_version == ''"
     runs-on: ${{ inputs.windows_version != '' && inputs.windows_version || 'windows-2022' }}
     timeout-minutes: 360 # GitHub Free max runtime is 6 hours
     steps:
@@ -207,24 +207,86 @@ jobs:
           C:\\Windows\\System32\\ngrok.exe service uninstall -ErrorAction SilentlyContinue
 
   vps-setup:
-    if: "startsWith(inputs.windows_version, 'ubuntu')"
-    runs-on: ${{ inputs.windows_version != '' && inputs.windows_version || 'ubuntu-latest' }}
+    if: "!startsWith(inputs.windows_version, 'windows') && inputs.windows_version != ''"
+    runs-on: ubuntu-latest
     timeout-minutes: 360 # GitHub Free max runtime is 6 hours
     steps:
+      - name: Optimize Disk and Configure RAM Swap
+        run: |
+          ramChoice="${{ inputs.ram_size }}"
+          echo "[*] Target VPS RAM: $ramChoice"
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /opt/hostedtoolcache
+          if [ "$ramChoice" = "32GB" ] || [ "$ramChoice" = "64GB" ] || [ "$ramChoice" = "16GB" ]; then
+            swapGB=8
+            if [ "$ramChoice" = "32GB" ]; then swapGB=24; fi
+            if [ "$ramChoice" = "64GB" ]; then swapGB=56; fi
+            echo "[*] Creating ${swapGB}GB swap file..."
+            sudo fallocate -l ${swapGB}G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=$((swapGB * 1024))
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+            echo "[+] Swap configured successfully!"
+          fi
+          free -h
+
       - name: Install and Extract Ngrok v3
         run: |
           curl -s https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz | sudo tar -C /usr/local/bin -xz
           sudo chmod +x /usr/local/bin/ngrok
 
-      - name: Configure Root and SSH Authentication
+      - name: Configure Multi-Distro Root and SSH Environment
         run: |
-          echo "root:Fazah@123" | sudo chpasswd
-          echo "runner:Fazah@123" | sudo chpasswd
-          sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/PermitRootLogin no/PermitRootLogin yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sudo systemctl restart ssh || sudo service ssh restart
+          TARGET_OS="${{ inputs.windows_version }}"
+          echo "[*] Setting up VPS environment for: $TARGET_OS"
+          
+          if [[ "$TARGET_OS" =~ ^ubuntu ]]; then
+            echo "[+] Configuring Native Ubuntu host SSH..."
+            echo "root:Fazah@123" | sudo chpasswd
+            echo "runner:Fazah@123" | sudo chpasswd
+            sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+            sudo sed -i 's/PermitRootLogin no/PermitRootLogin yes/' /etc/ssh/sshd_config
+            sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+            sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+            sudo systemctl restart ssh || sudo service ssh restart
+          else
+            echo "[+] Configuring Containerized $TARGET_OS environment..."
+            sudo systemctl stop ssh || sudo service ssh stop
+            
+            DOCKER_IMG="debian:12"
+            SETUP_CMD="apt-get update && apt-get install -y openssh-server sudo curl wget nano && mkdir -p /var/run/sshd && echo 'root:Fazah@123' | chpasswd && useradd -m -s /bin/bash runner && echo 'runner:Fazah@123' | chpasswd && usermod -aG sudo runner && echo 'runner ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && sed -i 's/PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && sed -i 's/PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config && /usr/sbin/sshd -D"
+            
+            if [[ "$TARGET_OS" =~ ^debian ]]; then
+              DOCKER_IMG="debian:12"
+            elif [[ "$TARGET_OS" =~ ^kali ]]; then
+              DOCKER_IMG="kalilinux/kali-rolling"
+              SETUP_CMD="apt-get update && apt-get install -y openssh-server sudo curl wget nano && mkdir -p /var/run/sshd && echo 'root:Fazah@123' | chpasswd && useradd -m -s /bin/bash runner && echo 'runner:Fazah@123' | chpasswd && usermod -aG sudo runner && echo 'runner ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && sed -i 's/PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && sed -i 's/PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config && /usr/sbin/sshd -D"
+            elif [[ "$TARGET_OS" =~ ^alpine ]]; then
+              DOCKER_IMG="alpine:latest"
+              SETUP_CMD="apk update && apk add --no-cache openssh bash sudo curl wget nano && ssh-keygen -A && echo 'root:Fazah@123' | chpasswd && adduser -D -s /bin/bash runner && echo 'runner:Fazah@123' | chpasswd && echo 'runner ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && sed -i 's/PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && sed -i 's/PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config && /usr/sbin/sshd -D"
+            elif [[ "$TARGET_OS" =~ ^arch ]]; then
+              DOCKER_IMG="archlinux:latest"
+              SETUP_CMD="pacman -Sy --noconfirm openssh sudo curl wget nano && ssh-keygen -A && echo 'root:Fazah@123' | chpasswd && useradd -m -s /bin/bash runner && echo 'runner:Fazah@123' | chpasswd && echo 'runner ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && sed -i 's/PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && sed -i 's/PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config && /usr/sbin/sshd -D"
+            elif [[ "$TARGET_OS" =~ ^fedora ]]; then
+              DOCKER_IMG="fedora:40"
+              SETUP_CMD="dnf install -y openssh-server sudo curl wget nano && ssh-keygen -A && echo 'root:Fazah@123' | chpasswd && useradd -m -s /bin/bash runner && echo 'runner:Fazah@123' | chpasswd && usermod -aG wheel runner && echo '%wheel ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && sed -i 's/PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && sed -i 's/PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config && /usr/sbin/sshd -D"
+            elif [[ "$TARGET_OS" =~ ^rocky ]]; then
+              DOCKER_IMG="rockylinux:9"
+              SETUP_CMD="dnf install -y openssh-server sudo curl wget nano && ssh-keygen -A && echo 'root:Fazah@123' | chpasswd && useradd -m -s /bin/bash runner && echo 'runner:Fazah@123' | chpasswd && usermod -aG wheel runner && echo '%wheel ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers && sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && sed -i 's/PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && sed -i 's/PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config && /usr/sbin/sshd -D"
+            fi
+            
+            echo "[*] Starting $DOCKER_IMG container on host port 22..."
+            docker run -d --name vps --privileged -p 22:22 "$DOCKER_IMG" sh -c "$SETUP_CMD"
+          fi
+          
+          # Wait for SSH port 22 to respond
+          echo "[*] Waiting for SSH service to listen on 127.0.0.1:22..."
+          for i in {1..30}; do
+            if nc -z 127.0.0.1 22 2>/dev/null || (exec 3<>/dev/tcp/127.0.0.1/22) 2>/dev/null; then
+              echo "[+] SSH Service is LIVE on port 22!"
+              break
+            fi
+            sleep 1
+          done
 
       - name: Configure and Start Ngrok SSH Tunnel
         id: ngrok-tunnel
