@@ -232,20 +232,57 @@ jobs:
           if [ -z "$tok" ]; then tok="${{ secrets.NGROK_AUTH_TOKEN }}"; fi
           ngrok config add-authtoken "$tok"
 
-      - name: Setup GUI Desktop Environment
+      - name: Setup GUI Desktop and XRDP
         if: "endsWith(inputs.windows_version, '-gui') || inputs.windows_version == 'android-cloud' || inputs.windows_version == 'ai-dev'"
         run: |
           TARGET_OS="${{ inputs.windows_version }}"
-          echo "[+] Installing XFCE Desktop & XRDP for $TARGET_OS..."
+          echo "[+] Installing XFCE Desktop & XRDP with Xorg driver for $TARGET_OS..."
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends             xfce4 xfce4-terminal xrdp dbus-x11 x11-xserver-utils python3-tk curl wget nano
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            xfce4 xfce4-terminal xrdp xorgxrdp dbus-x11 x11-xserver-utils python3-tk curl wget nano
           
-          echo "xfce4-session" > /home/runner/.xsession
-          sudo chown runner:runner /home/runner/.xsession
           echo "runner:Fazah@123" | sudo chpasswd
           echo "root:Fazah@123" | sudo chpasswd
           sudo adduser xrdp ssl-cert
+          sudo adduser runner ssl-cert
           
+          # Prevent Polkit Color Manager authorization crash in headless session
+          sudo mkdir -p /etc/polkit-1/localauthority/50-local.d
+          cat << 'EOF' | sudo tee /etc/polkit-1/localauthority/50-local.d/45-allow-colord.pkla > /dev/null
+          [Allow Colord all Users]
+          Identity=unix-user:*
+          Action=org.freedesktop.color-manager.create-device;org.freedesktop.color-manager.create-profile;org.freedesktop.color-manager.delete-device;org.freedesktop.color-manager.delete-profile;org.freedesktop.color-manager.modify-device;org.freedesktop.color-manager.modify-profile
+          ResultAny=no
+          ResultInactive=no
+          ResultActive=yes
+          EOF
+          
+          # Clean Xsession
+          echo "startxfce4" > /home/runner/.xsession
+          chmod +x /home/runner/.xsession
+          sudo chown runner:runner /home/runner/.xsession
+          
+          # Overwrite /etc/xrdp/startwm.sh to guarantee clean DBus session and prevent session crash
+          cat << 'EOF' | sudo tee /etc/xrdp/startwm.sh > /dev/null
+          #!/bin/sh
+          if [ -r /etc/default/locale ]; then
+            . /etc/default/locale
+            export LANG LANGUAGE
+          fi
+          unset DBUS_SESSION_BUS_ADDRESS
+          unset XDG_RUNTIME_DIR
+          exec dbus-launch --exit-with-session startxfce4
+          EOF
+          sudo chmod +x /etc/xrdp/startwm.sh
+          
+          # Configure auto-login in XRDP for runner so user connects directly without grey login window!
+          sudo sed -i '/^\[Xorg\]/,/^\[/ s/^username=.*/username=runner/' /etc/xrdp/xrdp.ini
+          sudo sed -i '/^\[Xorg\]/,/^\[/ s/^password=.*/password=Fazah@123/' /etc/xrdp/xrdp.ini
+
+      - name: Setup GUI Custom Themes and Apps
+        if: "endsWith(inputs.windows_version, '-gui') || inputs.windows_version == 'android-cloud' || inputs.windows_version == 'ai-dev'"
+        run: |
+          TARGET_OS="${{ inputs.windows_version }}"
           export TARGET_OS
           echo "aW1wb3J0IG9zLCBzeXMsIHpsaWIsIHN0cnVjdCwgc2h1dGlsCgp0YXJnZXQgPSBvcy5lbnZpcm9uLmdldCgnVEFSR0VUX09TJywgJ3VidW50dS1ndWknKQp0aGVtZXMgPSB7CiAgICAna2FsaS1ndWknOiAoKDEwLCAxNCwgMjIpLCAoMCwgNDgsIDk2KSksCiAgICAncGFycm90LWd1aSc6ICgoNCwgMTgsIDI0KSwgKDAsIDY4LCA1NSkpLAogICAgJ3VidW50dS1ndWknOiAoKDExOSwgMzMsIDExMSksICgyMzMsIDg0LCAzMikpLAogICAgJ21pbnQtZ3VpJzogKCgzNSwgNDAsIDQ4KSwgKDMwLCA4MCwgMzUpKSwKICAgICdhbmRyb2lkLWNsb3VkJzogKCg3LCAzMCwgNDUpLCAoMTUsIDk1LCA2MCkpLAogICAgJ2FpLWRldic6ICgoMTUsIDMsIDM1KSwgKDU1LCAxMiwgOTUpKQp9CmMxLCBjMiA9IHRoZW1lcy5nZXQodGFyZ2V0LCAoKDIwLCAyNCwgMzIpLCAoNDAsIDUwLCA3MCkpKQp3LCBoID0gMTkyMCwgMTA4MApyYXcgPSBieXRlYXJyYXkoKQpmb3IgeSBpbiByYW5nZShoKToKICAgIHJhdy5hcHBlbmQoMCkKICAgIHQgPSB5IC8gKGggLSAxKQogICAgciA9IGludChjMVswXSooMS10KSArIGMyWzBdKnQpCiAgICBnID0gaW50KGMxWzFdKigxLXQpICsgYzJbMV0qdCkKICAgIGIgPSBpbnQoYzFbMl0qKDEtdCkgKyBjMlsyXSp0KQogICAgZm9yIHggaW4gcmFuZ2Uodyk6CiAgICAgICAgbHIsIGxnLCBsYiA9IHIsIGcsIGIKICAgICAgICBpZiB4ICUgODAgPT0gMCBvciB5ICUgODAgPT0gMDoKICAgICAgICAgICAgbHIgPSBtaW4oMjU1LCBpbnQobHIqMS4yNSsxMikpCiAgICAgICAgICAgIGxnID0gbWluKDI1NSwgaW50KGxnKjEuMjUrMTIpKQogICAgICAgICAgICBsYiA9IG1pbigyNTUsIGludChsYioxLjI1KzEyKSkKICAgICAgICBpZiB5ID4gMTAzMDoKICAgICAgICAgICAgbHIsIGxnLCBsYiA9IGludChjMlswXSowLjkpLCBpbnQoYzJbMV0qMC45KSwgaW50KGMyWzJdKjAuOSkKICAgICAgICByYXcuZXh0ZW5kKChsciwgbGcsIGxiKSkKCmNvbXAgPSB6bGliLmNvbXByZXNzKGJ5dGVzKHJhdyksIDYpCnBuZyA9IGJ5dGVhcnJheShieXRlcyhbMTM3LCA4MCwgNzgsIDcxLCAxMywgMTAsIDI2LCAxMF0pKQppaGRyID0gc3RydWN0LnBhY2soJz5JSUJCQkJCJywgdywgaCwgOCwgMiwgMCwgMCwgMCkKcG5nLmV4dGVuZChzdHJ1Y3QucGFjaygnPkknLCAxMykgKyBiJ0lIRFInICsgaWhkciArIHN0cnVjdC5wYWNrKCc+SScsIHpsaWIuY3JjMzIoYidJSERSJyArIGloZHIpICYgMHhmZmZmZmZmZikpCnBuZy5leHRlbmQoc3RydWN0LnBhY2soJz5JJywgbGVuKGNvbXApKSArIGInSURBVCcgKyBjb21wICsgc3RydWN0LnBhY2soJz5JJywgemxpYi5jcmMzMihiJ0lEQVQnICsgY29tcCkgJiAweGZmZmZmZmZmKSkKcG5nLmV4dGVuZChzdHJ1Y3QucGFjaygnPkknLCAwKSArIGInSUVORCcgKyBzdHJ1Y3QucGFjaygnPkknLCB6bGliLmNyYzMyKGInSUVORCcpICYgMHhmZmZmZmZmZikpCgpiZyA9ICcvdXNyL3NoYXJlL2JhY2tncm91bmRzL2Rlc2t0b3AtYmcucG5nJwpvcy5tYWtlZGlycygnL3Vzci9zaGFyZS9iYWNrZ3JvdW5kcycsIGV4aXN0X29rPVRydWUpCndpdGggb3BlbihiZywgJ3diJykgYXMgZjogZi53cml0ZShwbmcpCgpmb3IgZCBpbiBbJy91c3Ivc2hhcmUvYmFja2dyb3VuZHMveGZjZScsICcvdXNyL3NoYXJlL2ltYWdlcy9kZXNrdG9wLWJhc2UnXToKICAgIG9zLm1ha2VkaXJzKGQsIGV4aXN0X29rPVRydWUpCmZvciBmYiBpbiBbJy91c3Ivc2hhcmUvYmFja2dyb3VuZHMveGZjZS94ZmNlLWJsdWUuanBnJywgJy91c3Ivc2hhcmUvYmFja2dyb3VuZHMveGZjZS94ZmNlLXRlYWwuanBnJywgJy91c3Ivc2hhcmUvaW1hZ2VzL2Rlc2t0b3AtYmFzZS9kZWZhdWx0J106CiAgICB0cnk6IHNodXRpbC5jb3B5ZmlsZShiZywgZmIpCiAgICBleGNlcHQ6IHBhc3MKCnhtbCA9ICcnJzw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04Ij8+PGNoYW5uZWwgbmFtZT0ieGZjZTQtZGVza3RvcCIgdmVyc2lvbj0iMS4wIj48cHJvcGVydHkgbmFtZT0iYmFja2Ryb3AiIHR5cGU9ImVtcHR5Ij48cHJvcGVydHkgbmFtZT0ic2NyZWVuMCIgdHlwZT0iZW1wdHkiPjxwcm9wZXJ0eSBuYW1lPSJtb25pdG9yMCIgdHlwZT0iZW1wdHkiPjxwcm9wZXJ0eSBuYW1lPSJ3b3Jrc3BhY2UwIiB0eXBlPSJlbXB0eSI+PHByb3BlcnR5IG5hbWU9ImNvbG9yLXN0eWxlIiB0eXBlPSJpbnQiIHZhbHVlPSIwIi8+PHByb3BlcnR5IG5hbWU9ImltYWdlLXN0eWxlIiB0eXBlPSJpbnQiIHZhbHVlPSI1Ii8+PHByb3BlcnR5IG5hbWU9Imxhc3QtaW1hZ2UiIHR5cGU9InN0cmluZyIgdmFsdWU9Ii91c3Ivc2hhcmUvYmFja2dyb3VuZHMvZGVza3RvcC1iZy5wbmciLz48L3Byb3BlcnR5PjwvcHJvcGVydHk+PHByb3BlcnR5IG5hbWU9Im1vbml0b3IxIiB0eXBlPSJlbXB0eSI+PHByb3BlcnR5IG5hbWU9IndvcmtzcGFjZTAiIHR5cGU9ImVtcHR5Ij48cHJvcGVydHkgbmFtZT0iY29sb3Itc3R5bGUiIHR5cGU9ImludCIgdmFsdWU9IjAiLz48cHJvcGVydHkgbmFtZT0iaW1hZ2Utc3R5bGUiIHR5cGU9ImludCIgdmFsdWU9IjUiLz48cHJvcGVydHkgbmFtZT0ibGFzdC1pbWFnZSIgdHlwZT0ic3RyaW5nIiB2YWx1ZT0iL3Vzci9zaGFyZS9iYWNrZ3JvdW5kcy9kZXNrdG9wLWJnLnBuZyIvPjwvcHJvcGVydHk+PC9wcm9wZXJ0eT48cHJvcGVydHkgbmFtZT0ibW9uaXRvcnJkcDAiIHR5cGU9ImVtcHR5Ij48cHJvcGVydHkgbmFtZT0id29ya3NwYWNlMCIgdHlwZT0iZW1wdHkiPjxwcm9wZXJ0eSBuYW1lPSJjb2xvci1zdHlsZSIgdHlwZT0iaW50IiB2YWx1ZT0iMCIvPjxwcm9wZXJ0eSBuYW1lPSJpbWFnZS1zdHlsZSIgdHlwZT0iaW50IiB2YWx1ZT0iNSIvPjxwcm9wZXJ0eSBuYW1lPSJsYXN0LWltYWdlIiB0eXBlPSJzdHJpbmciIHZhbHVlPSIvdXNyL3NoYXJlL2JhY2tncm91bmRzL2Rlc2t0b3AtYmcucG5nIi8+PC9wcm9wZXJ0eT48L3Byb3BlcnR5PjwvcHJvcGVydHk+PC9wcm9wZXJ0eT48cHJvcGVydHkgbmFtZT0iZGVza3RvcC1pY29ucyIgdHlwZT0iZW1wdHkiPjxwcm9wZXJ0eSBuYW1lPSJzdHlsZSIgdHlwZT0iaW50IiB2YWx1ZT0iMiIvPjxwcm9wZXJ0eSBuYW1lPSJmaWxlLWljb25zIiB0eXBlPSJlbXB0eSI+PHByb3BlcnR5IG5hbWU9InNob3ctaG9tZSIgdHlwZT0iYm9vbCIgdmFsdWU9InRydWUiLz48cHJvcGVydHkgbmFtZT0ic2hvdy1maWxlc3lzdGVtIiB0eXBlPSJib29sIiB2YWx1ZT0idHJ1ZSIvPjxwcm9wZXJ0eSBuYW1lPSJzaG93LXRyYXNoIiB0eXBlPSJib29sIiB2YWx1ZT0idHJ1ZSIvPjwvcHJvcGVydHk+PC9wcm9wZXJ0eT48L2NoYW5uZWw+JycnCgpmb3IgeGQgaW4gWycvZXRjL3hkZy94ZmNlNC94ZmNvbmYveGZjZS1wZXJjaGFubmVsLXhtbCcsICcvaG9tZS9ydW5uZXIvLmNvbmZpZy94ZmNlNC94ZmNvbmYveGZjZS1wZXJjaGFubmVsLXhtbCddOgogICAgb3MubWFrZWRpcnMoeGQsIGV4aXN0X29rPVRydWUpCiAgICB3aXRoIG9wZW4ob3MucGF0aC5qb2luKHhkLCAneGZjZTQtZGVza3RvcC54bWwnKSwgJ3cnKSBhcyBmOiBmLndyaXRlKHhtbCkKCmRkID0gJy9ob21lL3J1bm5lci9EZXNrdG9wJwpvcy5tYWtlZGlycyhkZCwgZXhpc3Rfb2s9VHJ1ZSkKZGVmIGFkZF9pY29uKGZuLCBuYW1lLCBjbWQsIGljb24pOgogICAgcCA9IG9zLnBhdGguam9pbihkZCwgZm4pCiAgICB3aXRoIG9wZW4ocCwgJ3cnKSBhcyBmOiBmLndyaXRlKGYnW0Rlc2t0b3AgRW50cnldXG5WZXJzaW9uPTEuMFxuVHlwZT1BcHBsaWNhdGlvblxuTmFtZT17bmFtZX1cbkV4ZWM9e2NtZH1cbkljb249e2ljb259XG5UZXJtaW5hbD1mYWxzZVxuJykKICAgIG9zLmNobW9kKHAsIDBvNzU1KQoKaWYgdGFyZ2V0ID09ICdrYWxpLWd1aSc6CiAgICBhZGRfaWNvbigna2FsaS10ZXJtLmRlc2t0b3AnLCAn8J+QiSBLYWxpIFRlcm1pbmFsIChSb290KScsICd4ZmNlNC10ZXJtaW5hbCAtLXRpdGxlPSLwn5CJIEthbGkgVGVybWluYWwgKFJvb3QpIicsICd1dGlsaXRpZXMtdGVybWluYWwnKQogICAgYWRkX2ljb24oJ25tYXAuZGVza3RvcCcsICfimpTvuI8gTm1hcCBTY2FubmVyJywgJ3hmY2U0LXRlcm1pbmFsIC0tdGl0bGU9IuKalO+4jyBObWFwIiAtZSAiYmFzaCAtYyBcJ25tYXAgLS1oZWxwIHwgaGVhZCAtbiAzMDsgZXhlYyBiYXNoXCciJywgJ25ldHdvcmstd2lyZWQnKQogICAgYWRkX2ljb24oJ3dpcmVzaGFyay5kZXNrdG9wJywgJ/CfpoggV2lyZXNoYXJrIEFuYWx5emVyJywgJ3dpcmVzaGFyaycsICdhcHBsaWNhdGlvbnMtaW50ZXJuZXQnKQogICAgYWRkX2ljb24oJ3NxbG1hcC5kZXNrdG9wJywgJ/CfkokgU1FMTWFwIFRvb2wnLCAneGZjZTQtdGVybWluYWwgLS10aXRsZT0i8J+SiSBTUUxNYXAiIC1lICJiYXNoIC1jIFwnc3FsbWFwIC0tdmVyc2lvbjsgZXhlYyBiYXNoXCciJywgJ3V0aWxpdGllcy10ZXJtaW5hbCcpCiAgICBhZGRfaWNvbignYnJvd3Nlci5kZXNrdG9wJywgJ/CfjJAgQ3liZXIgQnJvd3NlcicsICd4LXd3dy1icm93c2VyJywgJ3dlYi1icm93c2VyJykKZWxpZiB0YXJnZXQgPT0gJ3BhcnJvdC1ndWknOgogICAgYWRkX2ljb24oJ3BhcnJvdC10ZXJtLmRlc2t0b3AnLCAn8J+mnCBQYXJyb3QgVGVybWluYWwnLCAneGZjZTQtdGVybWluYWwgLS10aXRsZT0i8J+mnCBQYXJyb3QgVGVybWluYWwiJywgJ3V0aWxpdGllcy10ZXJtaW5hbCcpCiAgICBhZGRfaWNvbignYW5vbnN1cmYuZGVza3RvcCcsICfwn5uh77iPIEFub25TdXJmIFNoaWVsZCcsICd4ZmNlNC10ZXJtaW5hbCAtLXRpdGxlPSLwn5uh77iPIEFub25TdXJmIiAtZSAiYmFzaCAtYyBcJ2VjaG8gQW5vblN1cmYgQWN0aXZlOyBleGVjIGJhc2hcJyInLCAnc2VjdXJpdHktaGlnaCcpCiAgICBhZGRfaWNvbignbmlrdG8uZGVza3RvcCcsICfwn5SNIE5pa3RvIFNjYW5uZXInLCAneGZjZTQtdGVybWluYWwgLS10aXRsZT0i8J+UjSBOaWt0byIgLWUgImJhc2ggLWMgXCduaWt0byAtSDsgZXhlYyBiYXNoXCciJywgJ25ldHdvcmstd2lyZWQnKQogICAgYWRkX2ljb24oJ3dpcmVzaGFyay5kZXNrdG9wJywgJ/CfpoggV2lyZXNoYXJrIEN5YmVyJywgJ3dpcmVzaGFyaycsICdhcHBsaWNhdGlvbnMtaW50ZXJuZXQnKQogICAgYWRkX2ljb24oJ2Jyb3dzZXIuZGVza3RvcCcsICfwn4yQIEN5YmVyIEJyb3dzZXInLCAneC13d3ctYnJvd3NlcicsICd3ZWItYnJvd3NlcicpCmVsaWYgdGFyZ2V0ID09ICdtaW50LWd1aSc6CiAgICBhZGRfaWNvbignbWludC10ZXJtLmRlc2t0b3AnLCAn8J+NgyBNaW50IFRlcm1pbmFsJywgJ3hmY2U0LXRlcm1pbmFsIC0tdGl0bGU9IvCfjYMgTWludCBUZXJtaW5hbCInLCAndXRpbGl0aWVzLXRlcm1pbmFsJykKICAgIGFkZF9pY29uKCdmaWxlcy5kZXNrdG9wJywgJ/Cfk4EgRmlsZSBNYW5hZ2VyJywgJ3RodW5hciAvaG9tZS9ydW5uZXInLCAnc3lzdGVtLWZpbGUtbWFuYWdlcicpCiAgICBhZGRfaWNvbignc2V0dGluZ3MuZGVza3RvcCcsICfimpnvuI8gQ29udHJvbCBDZW50ZXInLCAneGZjZTQtc2V0dGluZ3MtbWFuYWdlcicsICdwcmVmZXJlbmNlcy1zeXN0ZW0nKQogICAgYWRkX2ljb24oJ2Jyb3dzZXIuZGVza3RvcCcsICfwn4yQIFdlYiBCcm93c2VyJywgJ3gtd3d3LWJyb3dzZXInLCAnd2ViLWJyb3dzZXInKQplbGlmIHRhcmdldCA9PSAnYW5kcm9pZC1jbG91ZCc6CiAgICBhZGRfaWNvbigncGhvbmUuZGVza3RvcCcsICfwn5OxIEFuZHJvaWQgVmlydHVhbCBQaG9uZScsICdweXRob24zIC91c3IvbG9jYWwvYmluL2FuZHJvaWRfcGhvbmUucHknLCAncGhvbmUnKQogICAgYWRkX2ljb24oJ2FkYi5kZXNrdG9wJywgJ+KaoSBBREIgU2hlbGwgVGVybWluYWwnLCAneGZjZTQtdGVybWluYWwgLS10aXRsZT0i8J+TsSBBREIgU2hlbGwiIC1lICJiYXNoIC1jIFwnYWRiIGRldmljZXM7IGV4ZWMgYmFzaFwnIicsICd1dGlsaXRpZXMtdGVybWluYWwnKQogICAgYWRkX2ljb24oJ2ZpbGVzLmRlc2t0b3AnLCAn8J+TgiBTdG9yYWdlICYgU0QnLCAndGh1bmFyIC9ob21lL3J1bm5lcicsICdzeXN0ZW0tZmlsZS1tYW5hZ2VyJykKICAgIGFkZF9pY29uKCdicm93c2VyLmRlc2t0b3AnLCAn8J+MkCBBbmRyb2lkIEJyb3dzZXInLCAneC13d3ctYnJvd3NlcicsICd3ZWItYnJvd3NlcicpCmVsaWYgdGFyZ2V0ID09ICdhaS1kZXYnOgogICAgYWRkX2ljb24oJ2p1cHl0ZXIuZGVza3RvcCcsICfwn5OTIExhdW5jaCBKdXB5dGVyTGFiIFN0dWRpbycsICd4LXd3dy1icm93c2VyICJodHRwOi8vbG9jYWxob3N0Ojg4ODgvbGFiP3Rva2VuPUZhemFoQDEyMyInLCAndGV4dC14LWdlbmVyaWMnKQogICAgYWRkX2ljb24oJ3B5dG9yY2guZGVza3RvcCcsICfwn6egIFB5VG9yY2ggQUkgVGVybWluYWwnLCAneGZjZTQtdGVybWluYWwgLS10aXRsZT0i8J+noCBQeVRvcmNoIEFJIiAtZSAicHl0aG9uMyInLCAndXRpbGl0aWVzLXRlcm1pbmFsJykKICAgIGFkZF9pY29uKCdicm93c2VyLmRlc2t0b3AnLCAn8J+MkCBXZWIgQnJvd3NlcicsICd4LXd3dy1icm93c2VyJywgJ3dlYi1icm93c2VyJykKICAgIGFkZF9pY29uKCdmaWxlcy5kZXNrdG9wJywgJ/Cfk4EgQUkgRGF0YXNldHMgJiBNb2RlbHMnLCAndGh1bmFyIC9ob21lL3J1bm5lcicsICdzeXN0ZW0tZmlsZS1tYW5hZ2VyJykKZWxzZToKICAgIGFkZF9pY29uKCd0ZXJtLmRlc2t0b3AnLCAn8J+QpyBVYnVudHUgVGVybWluYWwnLCAneGZjZTQtdGVybWluYWwnLCAndXRpbGl0aWVzLXRlcm1pbmFsJykKICAgIGFkZF9pY29uKCdmaWxlcy5kZXNrdG9wJywgJ/Cfk4EgRmlsZXMgKDI1MEdCKScsICd0aHVuYXIgL2hvbWUvcnVubmVyJywgJ3N5c3RlbS1maWxlLW1hbmFnZXInKQogICAgYWRkX2ljb24oJ2Jyb3dzZXIuZGVza3RvcCcsICfwn4yQIFdlYiBCcm93c2VyJywgJ3gtd3d3LWJyb3dzZXInLCAnd2ViLWJyb3dzZXInKQoKcHJpbnQoZiJbK10gQ3VzdG9taXphdGlvbiBjb21wbGV0ZSBmb3Ige3RhcmdldH0iKQo=" | base64 -d | sudo -E python3 -
           
@@ -268,8 +305,53 @@ jobs:
             python3 -m pip install --break-system-packages --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu > /dev/null 2>&1 &
           fi
           
-          sudo chown -R runner:runner /home/runner/Desktop /home/runner/.config 2>/dev/null || true
-          sudo systemctl restart xrdp
+          # Setup autostart apps for each OS
+          mkdir -p /home/runner/.config/autostart
+          if [ "$TARGET_OS" = "android-cloud" ]; then
+            cat << 'EOF' | sudo tee /home/runner/.config/autostart/android.desktop > /dev/null
+          [Desktop Entry]
+          Type=Application
+          Name=Android Phone
+          Exec=python3 /usr/local/bin/android_phone.py
+          Hidden=false
+          NoDisplay=false
+          X-GNOME-Autostart-enabled=true
+          EOF
+          elif [ "$TARGET_OS" = "ai-dev" ]; then
+            cat << 'EOF' | sudo tee /home/runner/.config/autostart/ai.desktop > /dev/null
+          [Desktop Entry]
+          Type=Application
+          Name=JupyterLab
+          Exec=x-www-browser "http://127.0.0.1:8888/lab?token=Fazah@123"
+          Hidden=false
+          NoDisplay=false
+          X-GNOME-Autostart-enabled=true
+          EOF
+          elif [ "$TARGET_OS" = "kali-gui" ]; then
+            cat << 'EOF' | sudo tee /home/runner/.config/autostart/kali.desktop > /dev/null
+          [Desktop Entry]
+          Type=Application
+          Name=Kali Offensive Suite
+          Exec=xfce4-terminal --title="🐉 Kali Linux Suite" --command="bash -c 'clear; echo \"===================================================\"; echo \" 🐉 KALI LINUX OFFENSIVE DESKTOP (ROOT / RUNNER)\"; echo \"===================================================\"; echo \" [+] Tools Ready: Nmap, Wireshark, SQLMap, John\"; echo \"===================================================\"; exec bash'"
+          Hidden=false
+          NoDisplay=false
+          X-GNOME-Autostart-enabled=true
+          EOF
+          elif [ "$TARGET_OS" = "parrot-gui" ]; then
+            cat << 'EOF' | sudo tee /home/runner/.config/autostart/parrot.desktop > /dev/null
+          [Desktop Entry]
+          Type=Application
+          Name=Parrot Cyber Suite
+          Exec=xfce4-terminal --title="🦜 Parrot Security OS" --command="bash -c 'clear; echo \"===================================================\"; echo \" 🦜 PARROT SECURITY DESKTOP\"; echo \"===================================================\"; echo \" [+] AnonSurf & Cyber Tools Ready\"; echo \"===================================================\"; exec bash'"
+          Hidden=false
+          NoDisplay=false
+          X-GNOME-Autostart-enabled=true
+          EOF
+          fi
+          
+          sudo chown -R runner:runner /home/runner/Desktop /home/runner/.config /home/runner/.xsession 2>/dev/null || true
+          sudo systemctl restart xrdp-sesman || sudo service xrdp-sesman restart || true
+          sudo systemctl restart xrdp || sudo service xrdp restart || true
           echo "TARGET_PORT=3389" >> $GITHUB_ENV
 
       - name: Setup Native Ubuntu VPS SSH
