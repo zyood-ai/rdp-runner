@@ -32,7 +32,7 @@ jobs:
           Invoke-WebRequest "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile ngrok.zip
           Expand-Archive ngrok.zip -DestinationPath .
           Remove-Item ngrok.zip
-          Copy-Item .\ngrok.exe C:\Windows\System32\ngrok.exe -Force
+          Copy-Item .\\ngrok.exe C:\\Windows\\System32\\ngrok.exe -Force
 
       - name: Optimize Disk and Configure RAM
         shell: pwsh
@@ -44,13 +44,13 @@ jobs:
             $pageMB = if ($ramChoice -eq "64GB") { 57344 } else { 24576 }
             try {
               Set-CimInstance -Query "Select * from Win32_ComputerSystem" -Property @{AutomaticManagedPagefile = $false} -ErrorAction SilentlyContinue
-              Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management' -Name 'PagingFiles' -Value @("C:\pagefile.sys $pageMB $pageMB") -ErrorAction SilentlyContinue
+              Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management' -Name 'PagingFiles' -Value @("C:\\pagefile.sys $pageMB $pageMB") -ErrorAction SilentlyContinue
               Write-Output "[+] Virtual memory pagefile configured for $pageMB MB"
             } catch {}
           }
           
           # Clean caches to maximize SSD free space
-          Remove-Item -Recurse -Force "C:\hostedtoolcache" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\\hostedtoolcache" -ErrorAction SilentlyContinue
           
           $freeGB = [Math]::Round((Get-PSDrive C).Free / 1GB, 1)
           Write-Output "[+] Free SSD Space on C:: $freeGB GB"
@@ -59,17 +59,17 @@ jobs:
         shell: pwsh
         run: |
           # Configure Remote Desktop in Registry
-          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "SecurityLayer" -Value 1 -Force
-          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "fPromptForPassword" -Value 0 -Force
-          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "PortNumber" -Value 3389 -Force
+          Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server" -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp" -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp" -Name "SecurityLayer" -Value 1 -Force
+          Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp" -Name "fPromptForPassword" -Value 0 -Force
+          Set-ItemProperty -Path "HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp" -Name "PortNumber" -Value 3389 -Force
           
           # Disable UDP and allow NTLM fallback for tunnel connections (prevents session drop)
-          New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" -Force -ErrorAction SilentlyContinue | Out-Null
-          Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" -Name "fDisableUDP" -Value 1 -Force -ErrorAction SilentlyContinue
-          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "LmCompatibilityLevel" -Value 2 -Force -ErrorAction SilentlyContinue
-          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters" -Name "BlockNTLM" -Value 0 -Force -ErrorAction SilentlyContinue
+          New-Item -Path "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services" -Force -ErrorAction SilentlyContinue | Out-Null
+          Set-ItemProperty -Path "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\Terminal Services" -Name "fDisableUDP" -Value 1 -Force -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa" -Name "LmCompatibilityLevel" -Value 2 -Force -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\LanmanWorkstation\\Parameters" -Name "BlockNTLM" -Value 0 -Force -ErrorAction SilentlyContinue
           
           # Configure and Restart TermService to apply fDenyTSConnections = 0
           Set-Service -Name "TermService" -StartupType Automatic
@@ -101,10 +101,10 @@ jobs:
       - name: Create Admin User
         shell: pwsh
         run: |
-          secedit /export /cfg C:\secpol.cfg
-          (Get-Content C:\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0").replace("MinimumPasswordLength = 8", "MinimumPasswordLength = 0") | Set-Content C:\secpol.cfg
-          secedit /configure /db C:\windows\security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
-          Remove-Item -Force C:\secpol.cfg -ErrorAction SilentlyContinue
+          secedit /export /cfg C:\\secpol.cfg
+          (Get-Content C:\\secpol.cfg).replace("PasswordComplexity = 1", "PasswordComplexity = 0").replace("MinimumPasswordLength = 8", "MinimumPasswordLength = 0") | Set-Content C:\\secpol.cfg
+          secedit /configure /db C:\\windows\\security\\local.sdb /cfg C:\\secpol.cfg /areas SECURITYPOLICY
+          Remove-Item -Force C:\\secpol.cfg -ErrorAction SilentlyContinue
 
           cmd.exe /c "net user Fazah Fazah@123 /add /expires:never /active:yes"
           cmd.exe /c "net localgroup Administrators Fazah /add"
@@ -130,11 +130,11 @@ jobs:
             '  rdp:',
             '    proto: tcp',
             '    addr: 127.0.0.1:3389'
-          ) | Out-File -FilePath "C:\ngrok.yml" -Encoding ascii
+          ) | Out-File -FilePath "C:\\ngrok.yml" -Encoding ascii
 
           Write-Output "[*] Installing Ngrok Windows Service..."
-          C:\Windows\System32\ngrok.exe service install --config="C:\ngrok.yml"
-          C:\Windows\System32\ngrok.exe service start
+          C:\\Windows\\System32\\ngrok.exe service install --config="C:\\ngrok.yml"
+          C:\\Windows\\System32\\ngrok.exe service start
 
           $tunnelUrl = $null
           $timeout = 20
@@ -203,8 +203,8 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          C:\Windows\System32\ngrok.exe service stop -ErrorAction SilentlyContinue
-          C:\Windows\System32\ngrok.exe service uninstall -ErrorAction SilentlyContinue
+          C:\\Windows\\System32\\ngrok.exe service stop -ErrorAction SilentlyContinue
+          C:\\Windows\\System32\\ngrok.exe service uninstall -ErrorAction SilentlyContinue
 
   vps-setup:
     if: "!startsWith(inputs.windows_version, 'windows') && inputs.windows_version != ''"
