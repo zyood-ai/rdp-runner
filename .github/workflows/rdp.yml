@@ -235,6 +235,12 @@ jobs:
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -restart -agent -console 2>/dev/null || true
 
+          # Prevent display sleep, screen saver, and keep WindowServer alive
+          sudo pmset -a displaysleep 0 disksleep 0 sleep 0 2>/dev/null || true
+          defaults write com.apple.screensaver idleTime 0 2>/dev/null || true
+          defaults -currentHost write com.apple.screensaver idleTime 0 2>/dev/null || true
+          nohup caffeinate -d -i -m -u -t 21600 > /dev/null 2>&1 &
+
           # Enable SSH Remote Login
           sudo systemsetup -setremotelogin on 2>/dev/null || true
           echo "[+] Remote access configured successfully!"
