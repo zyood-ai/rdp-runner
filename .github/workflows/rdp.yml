@@ -198,8 +198,127 @@ jobs:
           try { C:\Windows\System32\ngrok.exe service stop } catch {}
           try { C:\Windows\System32\ngrok.exe service uninstall } catch {}
 
+  macos-setup:
+    if: "startsWith(inputs.windows_version, 'mac')"
+    runs-on: macos-14
+    timeout-minutes: 360 # 6 hours max runtime
+    steps:
+      - name: Optimize System and Enable Screen Sharing & SSH
+        run: |
+          echo "[*] Setting runner user password..."
+          echo "runner:Fazah@123" | sudo chpasswd 2>/dev/null || sudo dscl . -passwd /Users/runner Fazah@123
+          
+          echo "[*] Enabling Apple Remote Desktop & Screen Sharing (VNC)..."
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -configure -allowAccessFor -allUsers -privs -all
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -configure -clientopts -setvnclegacy -vnclegacy yes
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -configure -clientopts -setvncpw -vncpw Fazah@123
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -restart -agent -console
+
+          echo "[*] Writing VNC legacy settings..."
+          echo "Fazah@123" | perl -we '
+            BEGIN { @k = unpack "C*", pack "H*", "1734516E8BA8C5E2FF1C39567390ADCA" };
+            $_ = <>; chomp; s/^(.{8}).*/$1/;
+            @p = unpack "C*", $_;
+            foreach (@k) { printf "%02X", $_ ^ (shift @p || 0) };
+            print "\n"
+          ' | sudo tee /Library/Preferences/com.apple.VNCSettings.txt > /dev/null 2>&1 || true
+
+          echo "[*] Enabling SSH Remote Login..."
+          sudo systemsetup -setremotelogin on 2>/dev/null || true
+
+      - name: Install and Configure Ngrok
+        id: ngrok-tunnel
+        run: |
+          echo "[*] Installing Ngrok for macOS ARM64 Apple Silicon..."
+          curl -s -L -o ngrok.zip https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-darwin-arm64.zip
+          unzip -q -o ngrok.zip
+          sudo mv ngrok /usr/local/bin/ngrok
+          sudo chmod +x /usr/local/bin/ngrok
+          rm -f ngrok.zip
+
+          tok="${{ inputs.ngrok_token }}"
+          if [ -z "$tok" ]; then tok="${{ secrets.NGROK_AUTH_TOKEN }}"; fi
+          ngrok config add-authtoken "$tok"
+
+          reg="${{ inputs.ngrok_region }}"
+          if [ -z "$reg" ] || [ "$reg" = "gb" ]; then reg="eu"; fi
+
+          echo "[*] Starting Ngrok TCP tunnel on VNC port 5900..."
+          nohup ngrok tcp 5900 --region "$reg" --log=stdout > /tmp/ngrok.log 2>&1 &
+
+          sleep 3
+          tunnel_url=""
+          for i in $(seq 1 30); do
+            tunnel_url=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'tcp://[^"]*' | head -n1 | sed 's|tcp://||')
+            if [ -n "$tunnel_url" ]; then
+              break
+            fi
+            sleep 2
+          done
+
+          if [ -n "$tunnel_url" ]; then
+            echo "tunnel_url=$tunnel_url" >> $GITHUB_OUTPUT
+            echo "[+] macOS Screen Sharing Tunnel: $tunnel_url"
+          else
+            echo "[!] Failed to establish tunnel"
+            cat /tmp/ngrok.log 2>/dev/null || true
+            exit 1
+          fi
+
+      - name: Build Connection Artifacts
+        run: |
+          url="${{ steps.ngrok-tunnel.outputs.tunnel_url }}"
+          host=$(echo "$url" | cut -d: -f1)
+          port=$(echo "$url" | cut -d: -f2)
+          
+          # Create rdp-connection.rdp for compatibility
+          echo "full address:s:$url" > rdp-connection.rdp
+          echo "username:s:runner" >> rdp-connection.rdp
+          echo "prompt for credentials:i:1" >> rdp-connection.rdp
+          echo "screen mode id:i:2" >> rdp-connection.rdp
+          echo "desktopwidth:i:1920" >> rdp-connection.rdp
+          echo "desktopheight:i:1080" >> rdp-connection.rdp
+          echo "$url" >> rdp-connection.rdp
+          
+          # Create direct .vnc file
+          cat <<EOF > macos.vnc
+[Connection]
+Host=$host
+Port=$port
+Password=Fazah@123
+[Options]
+RelativePtr=1
+FullColor=1
+EOF
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdp-connection
+          path: |
+            rdp-connection.rdp
+            macos.vnc
+          retention-days: 1
+
+      - name: Keep Alive Session
+        run: |
+          echo "[+] macOS session is active (${{ steps.ngrok-tunnel.outputs.tunnel_url }})! Keeping session active..."
+          reg="${{ inputs.ngrok_region }}"
+          if [ -z "$reg" ] || [ "$reg" = "gb" ]; then reg="eu"; fi
+          while true; do
+            if ! pgrep -x "ngrok" > /dev/null; then
+              echo "[!] Ngrok stopped. Restarting tunnel..."
+              nohup ngrok tcp 5900 --region "$reg" --log=stdout > /tmp/ngrok.log 2>&1 &
+            fi
+            sleep 60
+          done
+
   vps-setup:
-    if: "!startsWith(inputs.windows_version, 'windows') && inputs.windows_version != ''"
+    if: "!startsWith(inputs.windows_version, 'windows') && !startsWith(inputs.windows_version, 'mac') && inputs.windows_version != ''"
     runs-on: ubuntu-latest
     timeout-minutes: 360 # 6 hours max runtime
     steps:
