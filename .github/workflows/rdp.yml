@@ -49,7 +49,7 @@ jobs:
             } catch {}
           }
           
-          Remove-Item -Recurse -Force "C:\hostedtoolcache" -ErrorAction SilentlyContinue
+          Start-Job { Remove-Item -Recurse -Force "C:\hostedtoolcache" -ErrorAction SilentlyContinue } | Out-Null
           $freeGB = [Math]::Round((Get-PSDrive C).Free / 1GB, 1)
           Write-Output "[+] Free SSD Space on C:: $freeGB GB"
 
@@ -129,7 +129,7 @@ jobs:
           C:\Windows\System32\ngrok.exe service start
 
           $tunnelUrl = $null
-          $timeout = 20
+          $timeout = 30
           while ($timeout -gt 0 -and -not $tunnelUrl) {
             Start-Sleep -Seconds 2
             try {
@@ -195,8 +195,8 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          C:\Windows\System32\ngrok.exe service stop -ErrorAction SilentlyContinue
-          C:\Windows\System32\ngrok.exe service uninstall -ErrorAction SilentlyContinue
+          try { C:\Windows\System32\ngrok.exe service stop } catch {}
+          try { C:\Windows\System32\ngrok.exe service uninstall } catch {}
 
   vps-setup:
     if: "!startsWith(inputs.windows_version, 'windows') && inputs.windows_version != ''"
