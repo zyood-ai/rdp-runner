@@ -314,45 +314,13 @@ jobs:
           # Setup autostart apps for each OS
           mkdir -p /home/runner/.config/autostart
           if [ "$TARGET_OS" = "android-cloud" ]; then
-            cat << 'EOF' | sudo tee /home/runner/.config/autostart/android.desktop > /dev/null
-[Desktop Entry]
-Type=Application
-Name=Android Phone
-Exec=python3 /usr/local/bin/android_phone.py
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-EOF
+            printf '[Desktop Entry]\nType=Application\nName=Android Phone\nExec=python3 /usr/local/bin/android_phone.py\nHidden=false\nNoDisplay=false\nX-GNOME-Autostart-enabled=true\n' | sudo tee /home/runner/.config/autostart/android.desktop > /dev/null
           elif [ "$TARGET_OS" = "ai-dev" ]; then
-            cat << 'EOF' | sudo tee /home/runner/.config/autostart/ai.desktop > /dev/null
-[Desktop Entry]
-Type=Application
-Name=JupyterLab
-Exec=x-www-browser "http://127.0.0.1:8888/lab?token=Fazah@123"
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-EOF
+            printf '[Desktop Entry]\nType=Application\nName=JupyterLab\nExec=x-www-browser "http://127.0.0.1:8888/lab?token=Fazah@123"\nHidden=false\nNoDisplay=false\nX-GNOME-Autostart-enabled=true\n' | sudo tee /home/runner/.config/autostart/ai.desktop > /dev/null
           elif [ "$TARGET_OS" = "kali-gui" ]; then
-            cat << 'EOF' | sudo tee /home/runner/.config/autostart/kali.desktop > /dev/null
-[Desktop Entry]
-Type=Application
-Name=Kali Offensive Suite
-Exec=xfce4-terminal --title="🐉 Kali Linux Suite" --geometry=110x32 --command="bash -c 'clear; echo "========================================================================="; echo "  🐉 KALI LINUX OFFICIAL OFFENSIVE SUITE (ROOT / RUNNER)"; echo "========================================================================="; echo "  [+] Operating System : Kali Linux Security Desktop (64-bit)"; echo "  [+] User Privileges  : runner (sudo / root access)"; echo "  [+] Password         : Fazah@123"; echo "  [+] Desktop Theme    : Authentic Glowing Kali Dragon Wallpaper"; echo "  [+] Wordlists        : /usr/share/wordlists/rockyou.txt"; echo "-------------------------------------------------------------------------"; echo "  [⚔️] Preinstalled & Ready Offensive Security Arsenal:"; echo "       • Network     : Nmap, Wireshark, Tshark, Netcat, TCPDump"; echo "       • Passwords   : John The Ripper, THC Hydra, Hashcat"; echo "       • Web & Apps  : SQLMap, Nikto, Dirb, Gobuster, Wfuzz"; echo "       • Wireless    : Aircrack-ng Suite"; echo "       • Forensics   : Binwalk, Foremost, Testdisk, Steghide, Radare2"; echo "========================================================================="; exec bash'"
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-EOF
+            printf '[Desktop Entry]\nType=Application\nName=Kali Offensive Suite\nExec=xfce4-terminal --title="🐉 Kali Linux Suite" --geometry=110x32 --command="bash -c \'clear; echo =========================================================================; echo   🐉 KALI LINUX OFFICIAL OFFENSIVE SUITE (ROOT / RUNNER); echo =========================================================================; echo   [+] Operating System : Kali Linux Security Desktop (64-bit); echo   [+] User Privileges  : runner (sudo / root access); echo   [+] Password         : Fazah@123; echo   [+] Desktop Theme    : Authentic Glowing Kali Dragon Wallpaper; echo   [+] Wordlists        : /usr/share/wordlists/rockyou.txt; echo -------------------------------------------------------------------------; echo   [⚔️] Preinstalled & Ready Offensive Security Arsenal:; echo        • Network     : Nmap, Wireshark, Tshark, Netcat, TCPDump; echo        • Passwords   : John The Ripper, THC Hydra, Hashcat; echo        • Web & Apps  : SQLMap, Nikto, Dirb, Gobuster, Wfuzz; echo        • Wireless    : Aircrack-ng Suite; echo        • Forensics   : Binwalk, Foremost, Testdisk, Steghide, Radare2; echo =========================================================================; exec bash\'\n"\nHidden=false\nNoDisplay=false\nX-GNOME-Autostart-enabled=true\n' | sudo tee /home/runner/.config/autostart/kali.desktop > /dev/null
           elif [ "$TARGET_OS" = "parrot-gui" ]; then
-            cat << 'EOF' | sudo tee /home/runner/.config/autostart/parrot.desktop > /dev/null
-[Desktop Entry]
-Type=Application
-Name=Parrot Cyber Suite
-Exec=xfce4-terminal --title="🦜 Parrot Security OS" --command="bash -c 'clear; echo "==================================================="; echo " 🦜 PARROT SECURITY DESKTOP"; echo "==================================================="; echo " [+] AnonSurf & Cyber Tools Ready"; echo "==================================================="; exec bash'"
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-EOF
+            printf '[Desktop Entry]\nType=Application\nName=Parrot Cyber Suite\nExec=xfce4-terminal --title="🦜 Parrot Security OS" --command="bash -c \'clear; echo ===================================================; echo  🦜 PARROT SECURITY DESKTOP; echo ===================================================; echo  [+] AnonSurf & Cyber Tools Ready; echo ===================================================; exec bash\'\n"\nHidden=false\nNoDisplay=false\nX-GNOME-Autostart-enabled=true\n' | sudo tee /home/runner/.config/autostart/parrot.desktop > /dev/null
           fi
           
           sudo chown -R runner:runner /home/runner/Desktop /home/runner/.config /home/runner/.xsession 2>/dev/null || true
