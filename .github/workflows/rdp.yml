@@ -285,15 +285,13 @@ jobs:
           echo "$url" >> rdp-connection.rdp
           
           # Create direct .vnc file
-          cat <<EOF > macos.vnc
-[Connection]
-Host=$host
-Port=$port
-Password=Fazah@123
-[Options]
-RelativePtr=1
-FullColor=1
-EOF
+          echo "[Connection]" > macos.vnc
+          echo "Host=$host" >> macos.vnc
+          echo "Port=$port" >> macos.vnc
+          echo "Password=Fazah@123" >> macos.vnc
+          echo "[Options]" >> macos.vnc
+          echo "RelativePtr=1" >> macos.vnc
+          echo "FullColor=1" >> macos.vnc
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
