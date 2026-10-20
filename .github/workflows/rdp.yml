@@ -200,7 +200,7 @@ jobs:
 
   macos-setup:
     if: "startsWith(inputs.windows_version, 'mac')"
-    runs-on: macos-14
+    runs-on: macos-13
     timeout-minutes: 360 # 6 hours max runtime
     steps:
       - name: Optimize System and Enable Screen Sharing & SSH
@@ -249,10 +249,6 @@ jobs:
           defaults -currentHost write com.apple.screensaver idleTime 0 2>/dev/null || true
           nohup caffeinate -dis -u -t 21600 > /dev/null 2>&1 &
 
-          # Force restart loginwindow to attach virtual display and enter desktop
-          sudo killall loginwindow 2>/dev/null || true
-          sleep 4
-
           # Wake screen via Return key
           osascript -e 'tell application "System Events" to key code 36' 2>/dev/null || true
 
@@ -263,8 +259,13 @@ jobs:
       - name: Install and Configure Ngrok
         id: ngrok-tunnel
         run: |
-          echo "[*] Installing Ngrok for macOS ARM64 Apple Silicon..."
-          curl -s -L -o ngrok.zip https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-darwin-arm64.zip
+          echo "[*] Installing Ngrok for macOS..."
+          arch=$(uname -m)
+          if [ "$arch" = "arm64" ]; then
+            curl -s -L -o ngrok.zip https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-darwin-arm64.zip
+          else
+            curl -s -L -o ngrok.zip https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-darwin-amd64.zip
+          fi
           unzip -q -o ngrok.zip
           sudo mv ngrok /usr/local/bin/ngrok
           sudo chmod +x /usr/local/bin/ngrok
