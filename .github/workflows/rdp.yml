@@ -208,8 +208,13 @@ jobs:
           set +e
           echo "[*] Configuring Apple Remote Desktop and Screen Sharing..."
           
+          # Set password for runner user
+          echo -e "Fazah@123\nFazah@123" | sudo passwd runner 2>/dev/null || true
+          echo -e "Fazah@123\nFazah@123" | sudo passwd root 2>/dev/null || true
+
           # Create Fazah admin user with password Fazah@123
           sudo sysadminctl -addUser Fazah -password Fazah@123 -admin 2>/dev/null || true
+          echo -e "Fazah@123\nFazah@123" | sudo passwd Fazah 2>/dev/null || true
 
           # Set VNC password directly in VNCSettings
           echo "Fazah@123" | perl -we '
@@ -223,6 +228,8 @@ jobs:
           # Configure Apple Remote Desktop service
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -configure -allowAccessFor -allUsers -privs -all 2>/dev/null || true
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -configure -users runner,Fazah -access -on -privs -all 2>/dev/null || true
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -configure -clientopts -setvnclegacy -vnclegacy yes -setvncpw -vncpw Fazah@123 2>/dev/null || true
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
