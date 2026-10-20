@@ -216,6 +216,11 @@ jobs:
           sudo sysadminctl -addUser Fazah -password Fazah@123 -admin 2>/dev/null || true
           echo -e "Fazah@123\nFazah@123" | sudo passwd Fazah 2>/dev/null || true
 
+          # Enable Auto-Login for Fazah into the Aqua GUI desktop
+          sudo sysadminctl -autologin set -userName Fazah -password Fazah@123 2>/dev/null || true
+          sudo defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser -string "Fazah" 2>/dev/null || true
+          sudo defaults write /Library/Preferences/com.apple.loginwindow SHOWFULLNAME -bool FALSE 2>/dev/null || true
+
           # Set VNC password directly in VNCSettings
           echo "Fazah@123" | perl -we '
             BEGIN { @k = unpack "C*", pack "H*", "1734516E8BA8C5E2FF1C39567390ADCA" };
@@ -244,7 +249,11 @@ jobs:
           defaults -currentHost write com.apple.screensaver idleTime 0 2>/dev/null || true
           nohup caffeinate -dis -u -t 21600 > /dev/null 2>&1 &
 
-          # Wake screen
+          # Force restart loginwindow to attach virtual display and enter desktop
+          sudo killall loginwindow 2>/dev/null || true
+          sleep 4
+
+          # Wake screen via Return key
           osascript -e 'tell application "System Events" to key code 36' 2>/dev/null || true
 
           # Enable SSH Remote Login
