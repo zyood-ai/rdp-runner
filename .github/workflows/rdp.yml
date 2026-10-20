@@ -200,7 +200,7 @@ jobs:
 
   macos-setup:
     if: "startsWith(inputs.windows_version, 'mac')"
-    runs-on: macos-13
+    runs-on: macos-14
     timeout-minutes: 360 # 6 hours max runtime
     steps:
       - name: Optimize System and Enable Screen Sharing & SSH
@@ -208,13 +208,13 @@ jobs:
           set +e
           echo "[*] Configuring Apple Remote Desktop and Screen Sharing..."
           
-          # Set password for runner user
-          echo -e "Fazah@123\nFazah@123" | sudo passwd runner 2>/dev/null || true
-          echo -e "Fazah@123\nFazah@123" | sudo passwd root 2>/dev/null || true
+          # Set password for runner and root
+          echo "runner:Fazah@123" | sudo chpasswd 2>/dev/null || echo -e "Fazah@123\nFazah@123" | sudo passwd runner 2>/dev/null || true
+          echo "root:Fazah@123" | sudo chpasswd 2>/dev/null || echo -e "Fazah@123\nFazah@123" | sudo passwd root 2>/dev/null || true
 
           # Create Fazah admin user with password Fazah@123
           sudo sysadminctl -addUser Fazah -password Fazah@123 -admin 2>/dev/null || true
-          echo -e "Fazah@123\nFazah@123" | sudo passwd Fazah 2>/dev/null || true
+          echo "Fazah:Fazah@123" | sudo chpasswd 2>/dev/null || echo -e "Fazah@123\nFazah@123" | sudo passwd Fazah 2>/dev/null || true
 
           # Enable Auto-Login for Fazah into the Aqua GUI desktop
           sudo sysadminctl -autologin set -userName Fazah -password Fazah@123 2>/dev/null || true
@@ -229,6 +229,9 @@ jobs:
             foreach (@k) { printf "%02X", $_ ^ (shift @p || 0) };
             print "\n"
           ' | sudo tee /Library/Preferences/com.apple.VNCSettings.txt > /dev/null 2>&1 || true
+
+          # Load native Screen Sharing daemon
+          sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist 2>/dev/null || true
 
           # Reset TCC screen capture cache
           sudo tccutil reset ScreenCapture 2>/dev/null || true
