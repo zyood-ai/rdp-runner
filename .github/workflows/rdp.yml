@@ -22,8 +22,8 @@ on:
 
 jobs:
   rdp-setup:
-    if: "startsWith(inputs.windows_version, 'windows') || inputs.windows_version == ''"
-    runs-on: ${{ inputs.windows_version != '' && inputs.windows_version || 'windows-2022' }}
+    if: "startsWith(inputs.windows_version, 'windows') || startsWith(inputs.windows_version, 'win') || inputs.windows_version == ''"
+    runs-on: ${{ (inputs.windows_version == 'windows-2025' || inputs.windows_version == 'win2025-ai') && 'windows-2025' || 'windows-2022' }}
     timeout-minutes: 360 # 6 hours max runtime
     steps:
       - name: Download and extract Ngrok v3
@@ -169,6 +169,49 @@ jobs:
             "redirectclipboard:i:1"
           ) | Out-File -FilePath rdp-connection.rdp -Encoding ascii
 
+      - name: Install OpenCode AI and REA Tools (Windows AI Edition)
+        if: "inputs.windows_version == 'win2022-ai' || inputs.windows_version == 'win2025-ai'"
+        shell: pwsh
+        run: |
+          Write-Output "[*] Installing OpenCode AI Agent and REA Framework on Windows..."
+          try {
+            npm install -g opencode-ai rea-agents --force
+          } catch {
+            Write-Output "[!] NPM install error: $_"
+          }
+          
+          $desktopPath = "C:\Users\runneradmin\Desktop"
+          if (-not (Test-Path $desktopPath)) { New-Item -ItemType Directory -Path $desktopPath -Force | Out-Null }
+          
+          $openCodeBat = @"
+          @echo off
+          title OpenCode AI Assistant
+          color 0A
+          echo ========================================================
+          echo   [+] OpenCode AI Coding Agent (Ready to Code!)
+          echo ========================================================
+          echo.
+          cd /d C:\Users\runneradmin
+          call opencode
+          pause
+          "@
+          Set-Content -Path "$desktopPath\OpenCode AI.bat" -Value $openCodeBat -Encoding UTF8
+          
+          $reaBat = @"
+          @echo off
+          title REA Reverse Engineering Agent
+          color 0B
+          echo ========================================================
+          echo   [+] REA - Reverse Engineer Anything (Ready!)
+          echo ========================================================
+          echo.
+          cd /d C:\Users\runneradmin
+          call rea-agents
+          pause
+          "@
+          Set-Content -Path "$desktopPath\REA Tools.bat" -Value $reaBat -Encoding UTF8
+          Write-Output "[+] OpenCode and REA AI environment ready on Desktop!"
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -199,8 +242,8 @@ jobs:
           try { C:\Windows\System32\ngrok.exe service uninstall } catch {}
 
   vps-setup:
-    if: "!startsWith(inputs.windows_version, 'windows') && !startsWith(inputs.windows_version, 'mac') && inputs.windows_version != ''"
-    runs-on: ubuntu-latest
+    if: "!startsWith(inputs.windows_version, 'windows') && !startsWith(inputs.windows_version, 'win') && !startsWith(inputs.windows_version, 'mac') && inputs.windows_version != ''"
+    runs-on: ${{ (inputs.windows_version == 'ubuntu-24.04' || inputs.windows_version == 'ubuntu24-ai' || inputs.windows_version == 'ubuntu24-gui-ai') && 'ubuntu-24.04' || ((inputs.windows_version == 'ubuntu-22.04' || inputs.windows_version == 'ubuntu22-ai' || inputs.windows_version == 'ubuntu22-gui-ai') && 'ubuntu-22.04' || 'ubuntu-latest') }}
     timeout-minutes: 360 # 6 hours max runtime
     steps:
       - name: Optimize Disk and Configure RAM Swap
@@ -233,7 +276,7 @@ jobs:
           ngrok config add-authtoken "$tok"
 
       - name: Setup GUI Desktop and XRDP
-        if: "endsWith(inputs.windows_version, '-gui') || inputs.windows_version == 'android-cloud' || inputs.windows_version == 'ai-dev'"
+        if: "endsWith(inputs.windows_version, '-gui') || endsWith(inputs.windows_version, '-gui-ai') || inputs.windows_version == 'android-cloud' || inputs.windows_version == 'ai-dev'"
         run: |
           TARGET_OS="${{ inputs.windows_version }}"
           echo "[+] Installing XFCE Desktop & XRDP with Xorg driver for $TARGET_OS..."
@@ -302,8 +345,42 @@ jobs:
           sudo systemctl restart xrdp || sudo service xrdp restart || true
           echo "TARGET_PORT=3389" >> $GITHUB_ENV
 
+      - name: Install OpenCode and REA on Ubuntu GUI Desktop
+        if: "endsWith(inputs.windows_version, '-gui-ai')"
+        run: |
+          echo "[*] Installing OpenCode AI and REA for Desktop GUI..."
+          sudo npm install -g opencode-ai rea-agents || curl -fsSL https://opencode.ai/install | bash || true
+          sudo ln -sf $(which rea-agents) /usr/local/bin/rea 2>/dev/null || true
+          mkdir -p /home/runner/Desktop
+          cat << 'EOF' > /home/runner/Desktop/OpenCode.desktop
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=🤖 OpenCode AI Agent
+Comment=AI Coding Assistant
+Exec=xfce4-terminal -e "opencode"
+Icon=utilities-terminal
+Path=/home/runner
+Terminal=false
+StartupNotify=true
+EOF
+          cat << 'EOF' > /home/runner/Desktop/REA-Agent.desktop
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=🔍 REA Agent
+Comment=Reverse Engineer Anything
+Exec=xfce4-terminal -e "rea-agents"
+Icon=utilities-terminal
+Path=/home/runner
+Terminal=false
+StartupNotify=true
+EOF
+          chmod +x /home/runner/Desktop/*.desktop
+          sudo chown -R runner:runner /home/runner/Desktop
+
       - name: Setup Native Ubuntu VPS SSH
-        if: "startsWith(inputs.windows_version, 'ubuntu') && !endsWith(inputs.windows_version, '-gui') && inputs.windows_version != 'android-cloud' && inputs.windows_version != 'ai-dev'"
+        if: "(startsWith(inputs.windows_version, 'ubuntu') || startsWith(inputs.windows_version, 'ubuntu2')) && !contains(inputs.windows_version, '-gui') && inputs.windows_version != 'android-cloud' && inputs.windows_version != 'ai-dev'"
         run: |
           echo "[+] Configuring Native Ubuntu host SSH..."
           echo "root:Fazah@123" | sudo chpasswd
@@ -319,8 +396,21 @@ jobs:
           echo 'echo "========================================================="' >> /home/runner/.bashrc
           echo "TARGET_PORT=22" >> $GITHUB_ENV
 
+      - name: Install OpenCode and REA on Ubuntu SSH VPS
+        if: "inputs.windows_version == 'ubuntu22-ai' || inputs.windows_version == 'ubuntu24-ai'"
+        run: |
+          echo "[*] Installing OpenCode AI and REA on Ubuntu SSH VPS..."
+          sudo npm install -g opencode-ai rea-agents || curl -fsSL https://opencode.ai/install | bash || true
+          sudo ln -sf $(which rea-agents) /usr/local/bin/rea 2>/dev/null || true
+          echo 'echo "========================================================="' >> /home/runner/.bashrc
+          echo 'echo " 🤖 Welcome to Ubuntu AI & REA VPS (Root Access)"' >> /home/runner/.bashrc
+          echo 'echo " 🧠 OpenCode AI Agent: Just type '''opencode'''"' >> /home/runner/.bashrc
+          echo 'echo " 🔍 REA (Reverse Engineer Anything): Just type '''rea''' or '''rea-agents'''"' >> /home/runner/.bashrc
+          echo 'echo "========================================================="' >> /home/runner/.bashrc
+          echo 'alias rea="rea-agents"' >> /home/runner/.bashrc
+
       - name: Setup Containerized Distro VPS SSH
-        if: "!startsWith(inputs.windows_version, 'ubuntu') && !endsWith(inputs.windows_version, '-gui') && inputs.windows_version != 'android-cloud' && inputs.windows_version != 'ai-dev'"
+        if: "!startsWith(inputs.windows_version, 'ubuntu') && !startsWith(inputs.windows_version, 'ubuntu2') && !endsWith(inputs.windows_version, '-gui') && !endsWith(inputs.windows_version, '-gui-ai') && inputs.windows_version != 'android-cloud' && inputs.windows_version != 'ai-dev'"
         run: |
           TARGET_OS="${{ inputs.windows_version }}"
           echo "[+] Preparing Containerized VPS for: $TARGET_OS"
@@ -400,7 +490,7 @@ jobs:
           url="${{ steps.ngrok-tunnel.outputs.tunnel_url }}"
           port="${{ env.TARGET_PORT }}"
           user_name="runner"
-          if [[ "${{ inputs.windows_version }}" =~ ^windows ]]; then user_name="Fazah"; fi
+          if [[ "${{ inputs.windows_version }}" =~ ^win ]]; then user_name="Fazah"; fi
           
           echo "full address:s:$url" > rdp-connection.rdp
           echo "username:s:$user_name" >> rdp-connection.rdp
