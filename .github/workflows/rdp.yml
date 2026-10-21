@@ -176,8 +176,7 @@ jobs:
           path: rdp-connection.rdp
           retention-days: 1
 
-      - name: Install OpenCode AI and REA Tools (Windows AI Edition)
-        if: "inputs.windows_version == 'win2022-ai' || inputs.windows_version == 'win2025-ai'"
+      - name: Install OpenCode AI and REA Tools (Windows)
         continue-on-error: true
         shell: pwsh
         run: |
@@ -413,32 +412,44 @@ jobs:
           echo 'echo "========================================================="' >> /home/runner/.bashrc
           echo "TARGET_PORT=22" >> $GITHUB_ENV
 
-      - name: Install and Configure OpenCode AI with REA (Ubuntu AI Edition)
-        if: "inputs.windows_version == 'ubuntu22-ai' || inputs.windows_version == 'ubuntu24-ai' || endsWith(inputs.windows_version, '-gui-ai')"
+      - name: Install and Configure OpenCode AI with REA (Linux VPS & GUI)
         continue-on-error: true
         run: |
-          echo "[*] Setting up Integrated AI Environment (OpenCode + REA) on Ubuntu..."
+          echo "[*] Setting up Integrated AI Environment (OpenCode + REA) on Linux..."
           sudo npm install -g opencode-ai @opencode/cli rea-agents --force || curl -fsSL https://opencode.ai/install | bash || true
           sudo ln -sf $(which rea-agents 2>/dev/null || which rea 2>/dev/null) /usr/local/bin/rea 2>/dev/null || true
-          sudo mkdir -p /home/runner/.config/opencode /home/runner /root/.config/opencode /etc/skel/.config/opencode
-          echo '{"$schema":"https://opencode.ai/config.json","mcp":{"rea":{"type":"local","command":["npx","-y","rea-agents","mcp"],"enabled":true}}}' | sudo tee /home/runner/.config/opencode/opencode.json /home/runner/opencode.json /root/.config/opencode/opencode.json /etc/skel/.config/opencode/opencode.json > /dev/null
-          sudo chown -R runner:runner /home/runner/.config /home/runner/opencode.json 2>/dev/null || true
-          echo 'echo "======================================================================="' >> /home/runner/.bashrc
-          echo 'echo " [AI] Welcome to AI Developer Cloud (OpenCode + REA)"' >> /home/runner/.bashrc
-          echo 'echo " [*] OpenCode AI Agent:   Type '''opencode''' (Integrated with REA MCP)"' >> /home/runner/.bashrc
-          echo 'echo " [*] REA Reverse Eng:     Type '''rea''' or '''rea-agents'''"' >> /home/runner/.bashrc
-          echo 'echo "======================================================================="' >> /home/runner/.bashrc
-          echo 'alias rea="rea-agents"' >> /home/runner/.bashrc
-          if [[ "${{ inputs.windows_version }}" =~ -gui-ai$ ]]; then
+          sudo ln -sf $(which opencode 2>/dev/null) /usr/local/bin/opencode 2>/dev/null || true
+          
+          # Setup OpenCode Config with REA MCP for all user profiles
+          for p in /home/runner /root /etc/skel; do
+            sudo mkdir -p "$p/.config/opencode"
+            echo '{"$schema":"https://opencode.ai/config.json","mcp":{"rea":{"type":"local","command":["npx","-y","rea-agents","mcp"],"enabled":true}}}' | sudo tee "$p/.config/opencode/opencode.json" "$p/opencode.json" > /dev/null
+            sudo chown -R runner:runner "$p/.config" "$p/opencode.json" 2>/dev/null || true
+            
+            # Aliases & Banner
+            sudo touch "$p/.bashrc"
+            echo 'alias rea="rea-agents"' | sudo tee -a "$p/.bashrc" > /dev/null
+            echo 'alias opencode="opencode"' | sudo tee -a "$p/.bashrc" > /dev/null
+            echo 'echo "======================================================================="' | sudo tee -a "$p/.bashrc" > /dev/null
+            echo 'echo " 🤖 OpenCode AI Agent + REA Reverse Engineering MCP Ready!"' | sudo tee -a "$p/.bashrc" > /dev/null
+            echo 'echo " [*] OpenCode AI Agent:   Type '''opencode''' (Integrated with REA MCP)"' | sudo tee -a "$p/.bashrc" > /dev/null
+            echo 'echo " [*] REA Reverse Eng:     Type '''rea''' or '''rea-agents'''"' | sudo tee -a "$p/.bashrc" > /dev/null
+            echo 'echo " [*] Official Arabic:     https://opencode.ai/ar"' | sudo tee -a "$p/.bashrc" > /dev/null
+            echo 'echo "======================================================================="' | sudo tee -a "$p/.bashrc" > /dev/null
+          done
+          
+          # GUI Desktop Shortcuts
+          if [[ "${{ inputs.windows_version }}" =~ -gui || "${{ inputs.windows_version }}" =~ -gui-ai || "${{ inputs.windows_version }}" == "android-cloud" || "${{ inputs.windows_version }}" == "ai-dev" ]]; then
             for dp in /home/runner/Desktop /root/Desktop /etc/skel/Desktop; do
               sudo mkdir -p "$dp"
               printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=OpenCode AI\nComment=AI Coding Assistant (https://opencode.ai)\nExec=xfce4-terminal -e "opencode"\nIcon=utilities-terminal\nPath=/home/runner\nTerminal=false\nStartupNotify=true\n' | sudo tee "$dp/OpenCode.desktop" > /dev/null
               printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=REA Agent\nComment=Reverse Engineer Anything\nExec=xfce4-terminal -e "rea-agents"\nIcon=utilities-terminal\nPath=/home/runner\nTerminal=false\nStartupNotify=true\n' | sudo tee "$dp/REA-Agent.desktop" > /dev/null
+              printf '[Desktop Entry]\nVersion=1.0\nType=Link\nName=OpenCode Official (Web)\nComment=Visit OpenCode AI Website\nURL=https://opencode.ai/ar\nIcon=web-browser\n' | sudo tee "$dp/OpenCode-Official.desktop" > /dev/null
               sudo chmod +x "$dp"/*.desktop 2>/dev/null || true
               sudo chown -R runner:runner "$dp" 2>/dev/null || true
             done
           fi
-          echo "[+] Integrated AI Environment Ready on Ubuntu!"
+          echo "[+] Integrated AI Environment (OpenCode + REA) Ready on Linux!" 
 
       - name: Setup Containerized Distro VPS SSH
         if: "!startsWith(inputs.windows_version, 'ubuntu') && !startsWith(inputs.windows_version, 'ubuntu2') && !endsWith(inputs.windows_version, '-gui') && !endsWith(inputs.windows_version, '-gui-ai') && inputs.windows_version != 'android-cloud' && inputs.windows_version != 'ai-dev'"
