@@ -182,7 +182,12 @@ jobs:
         run: |
           Write-Output "[*] Setting up Integrated AI Environment (OpenCode + REA)..."
           try {
-            npm install -g opencode-ai rea-agents --force
+            npm install -g opencode-ai @opencode/cli rea-agents --force
+            $npmPrefix = (npm config get prefix).Trim()
+            $curPath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+            if ($curPath -notlike "*$npmPrefix*") {
+              [Environment]::SetEnvironmentVariable("Path", "$curPath;$npmPrefix", "Machine")
+            }
           } catch {
             Write-Output "[!] NPM install warning: $_"
           }
@@ -197,30 +202,37 @@ jobs:
             }
           } | ConvertTo-Json -Depth 5
           $targetDirs = @(
+            "C:\Users\Public\.config\opencode",
+            "C:\Users\Fazah\.config\opencode",
+            "C:\Users\Fazah\AppData\Roaming\opencode",
+            "C:\Users\Fazah",
             "C:\Users\runneradmin\.config\opencode",
             "C:\Users\runneradmin\AppData\Roaming\opencode",
-            "C:\Users\runneradmin"
+            "C:\Users\runneradmin",
+            "C:\Users\Default\.config\opencode"
           )
           foreach ($d in $targetDirs) {
             if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
             Set-Content -Path "$d\opencode.json" -Value $cfg -Encoding UTF8
           }
-          $desktopPath = "C:\Users\runneradmin\Desktop"
-          if (-not (Test-Path $desktopPath)) { New-Item -ItemType Directory -Path $desktopPath -Force | Out-Null }
           $openCodeBat = @(
             "@echo off",
             "title OpenCode AI Assistant (Integrated with REA)",
             "color 0A",
             "echo =======================================================================",
             "echo   [+] OpenCode AI Agent + REA Reverse Engineering MCP",
-            "echo   [+] Type your prompt or coding task below:",
+            "echo   [+] Official Website: https://opencode.ai/ar",
             "echo =======================================================================",
             "echo.",
-            "cd /d C:\Users\runneradmin",
-            "call opencode",
+            "cd /d "%USERPROFILE%"",
+            "where opencode >nul 2>nul",
+            "if %errorlevel% equ 0 (",
+            "  call opencode",
+            ") else (",
+            "  call npx -y @opencode/cli",
+            ")",
             "pause"
           )
-          Set-Content -Path "$desktopPath\OpenCode AI.bat" -Value $openCodeBat -Encoding UTF8
           $reaBat = @(
             "@echo off",
             "title REA Reverse Engineering Agent",
@@ -229,12 +241,29 @@ jobs:
             "echo   [+] REA - Reverse Engineer Anything (MCP Engine)",
             "echo =======================================================================",
             "echo.",
-            "cd /d C:\Users\runneradmin",
-            "call rea-agents",
+            "cd /d "%USERPROFILE%"",
+            "where rea-agents >nul 2>nul",
+            "if %errorlevel% equ 0 (",
+            "  call rea-agents",
+            ") else (",
+            "  call npx -y rea-agents",
+            ")",
             "pause"
           )
-          Set-Content -Path "$desktopPath\REA Tools.bat" -Value $reaBat -Encoding UTF8
-          Write-Output "[+] OpenCode AI and REA integrated successfully on Windows!"
+          $urlContent = "[InternetShortcut]`r`nURL=https://opencode.ai/ar`r`nIconIndex=0`r`n"
+          $allDesktops = @(
+            "C:\Users\Public\Desktop",
+            "C:\Users\Fazah\Desktop",
+            "C:\Users\runneradmin\Desktop",
+            "C:\Users\Default\Desktop"
+          )
+          foreach ($dp in $allDesktops) {
+            if (-not (Test-Path $dp)) { New-Item -ItemType Directory -Path $dp -Force | Out-Null }
+            Set-Content -Path "$dp\OpenCode AI.bat" -Value $openCodeBat -Encoding UTF8
+            Set-Content -Path "$dp\REA Agent.bat" -Value $reaBat -Encoding UTF8
+            Set-Content -Path "$dp\OpenCode Official.url" -Value $urlContent -Encoding ASCII
+          }
+          Write-Output "[+] OpenCode AI and REA shortcuts created on all desktop profiles (Public, Fazah, runneradmin)!"
 
       - name: Keep Alive Session
         shell: pwsh
@@ -383,11 +412,11 @@ jobs:
         if: "inputs.windows_version == 'ubuntu22-ai' || inputs.windows_version == 'ubuntu24-ai' || endsWith(inputs.windows_version, '-gui-ai')"
         run: |
           echo "[*] Setting up Integrated AI Environment (OpenCode + REA) on Ubuntu..."
-          sudo npm install -g opencode-ai rea-agents || curl -fsSL https://opencode.ai/install | bash || true
-          sudo ln -sf $(which rea-agents) /usr/local/bin/rea 2>/dev/null || true
-          mkdir -p /home/runner/.config/opencode /home/runner
-          echo '{"$schema":"https://opencode.ai/config.json","mcp":{"rea":{"type":"local","command":["npx","-y","rea-agents","mcp"],"enabled":true}}}' | tee /home/runner/.config/opencode/opencode.json /home/runner/opencode.json > /dev/null
-          sudo chown -R runner:runner /home/runner/.config /home/runner/opencode.json
+          sudo npm install -g opencode-ai @opencode/cli rea-agents --force || curl -fsSL https://opencode.ai/install | bash || true
+          sudo ln -sf $(which rea-agents 2>/dev/null || which rea 2>/dev/null) /usr/local/bin/rea 2>/dev/null || true
+          sudo mkdir -p /home/runner/.config/opencode /home/runner /root/.config/opencode /etc/skel/.config/opencode
+          echo '{"$schema":"https://opencode.ai/config.json","mcp":{"rea":{"type":"local","command":["npx","-y","rea-agents","mcp"],"enabled":true}}}' | sudo tee /home/runner/.config/opencode/opencode.json /home/runner/opencode.json /root/.config/opencode/opencode.json /etc/skel/.config/opencode/opencode.json > /dev/null
+          sudo chown -R runner:runner /home/runner/.config /home/runner/opencode.json 2>/dev/null || true
           echo 'echo "======================================================================="' >> /home/runner/.bashrc
           echo 'echo " [AI] Welcome to AI Developer Cloud (OpenCode + REA)"' >> /home/runner/.bashrc
           echo 'echo " [*] OpenCode AI Agent:   Type '''opencode''' (Integrated with REA MCP)"' >> /home/runner/.bashrc
@@ -395,11 +424,13 @@ jobs:
           echo 'echo "======================================================================="' >> /home/runner/.bashrc
           echo 'alias rea="rea-agents"' >> /home/runner/.bashrc
           if [[ "${{ inputs.windows_version }}" =~ -gui-ai$ ]]; then
-            mkdir -p /home/runner/Desktop
-            printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=OpenCode AI + REA\nComment=AI Coding Assistant\nExec=xfce4-terminal -e "opencode"\nIcon=utilities-terminal\nPath=/home/runner\nTerminal=false\nStartupNotify=true\n' > /home/runner/Desktop/OpenCode.desktop
-            printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=REA Agent\nComment=Reverse Engineer Anything\nExec=xfce4-terminal -e "rea-agents"\nIcon=utilities-terminal\nPath=/home/runner\nTerminal=false\nStartupNotify=true\n' > /home/runner/Desktop/REA-Agent.desktop
-            chmod +x /home/runner/Desktop/*.desktop
-            sudo chown -R runner:runner /home/runner/Desktop
+            for dp in /home/runner/Desktop /root/Desktop /etc/skel/Desktop; do
+              sudo mkdir -p "$dp"
+              printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=OpenCode AI\nComment=AI Coding Assistant (https://opencode.ai)\nExec=xfce4-terminal -e "opencode"\nIcon=utilities-terminal\nPath=/home/runner\nTerminal=false\nStartupNotify=true\n' | sudo tee "$dp/OpenCode.desktop" > /dev/null
+              printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=REA Agent\nComment=Reverse Engineer Anything\nExec=xfce4-terminal -e "rea-agents"\nIcon=utilities-terminal\nPath=/home/runner\nTerminal=false\nStartupNotify=true\n' | sudo tee "$dp/REA-Agent.desktop" > /dev/null
+              sudo chmod +x "$dp"/*.desktop 2>/dev/null || true
+              sudo chown -R runner:runner "$dp" 2>/dev/null || true
+            done
           fi
           echo "[+] Integrated AI Environment Ready on Ubuntu!"
 
