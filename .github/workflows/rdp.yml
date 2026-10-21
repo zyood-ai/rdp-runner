@@ -169,42 +169,25 @@ jobs:
             "redirectclipboard:i:1"
           ) | Out-File -FilePath rdp-connection.rdp -Encoding ascii
 
-      - name: Install and Configure OpenCode AI with REA and Ollama (Windows AI Edition)
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdp-connection
+          path: rdp-connection.rdp
+          retention-days: 1
+
+      - name: Install OpenCode AI and REA Tools (Windows AI Edition)
         if: "inputs.windows_version == 'win2022-ai' || inputs.windows_version == 'win2025-ai'"
         shell: pwsh
         run: |
-          Write-Output "[*] Setting up Integrated AI Environment (OpenCode + REA + Ollama)..."
+          Write-Output "[*] Setting up Integrated AI Environment (OpenCode + REA)..."
           try {
             npm install -g opencode-ai rea-agents --force
           } catch {
             Write-Output "[!] NPM install warning: $_"
           }
-          try {
-            Write-Output "[*] Installing Ollama local AI engine..."
-            Invoke-WebRequest "https://ollama.com/download/OllamaSetup.exe" -OutFile "$env:TEMP\OllamaSetup.exe" -UseBasicParsing
-            Start-Process "$env:TEMP\OllamaSetup.exe" -ArgumentList "/silent" -Wait
-            $ollamaPath = "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe"
-            if (Test-Path $ollamaPath) {
-              $env:PATH += ";$env:LOCALAPPDATA\Programs\Ollama"
-              Start-Process $ollamaPath -ArgumentList "serve" -WindowStyle Hidden
-              Start-Sleep -Seconds 3
-              Write-Output "[*] Pulling Qwen 2.5 Coder lightweight model for offline AI..."
-              & $ollamaPath pull qwen2.5-coder:1.5b
-            }
-          } catch {
-            Write-Output "[!] Ollama setup note: $_"
-          }
           $cfg = @{
             "`$schema" = "https://opencode.ai/config.json"
-            provider = @{
-              ollama = @{
-                npm = "@ai-sdk/openai-compatible"
-                name = "Ollama (Local AI)"
-                options = @{
-                  baseURL = "http://127.0.0.1:11434/v1"
-                }
-              }
-            }
             mcp = @{
               rea = @{
                 type = "local"
@@ -226,10 +209,10 @@ jobs:
           if (-not (Test-Path $desktopPath)) { New-Item -ItemType Directory -Path $desktopPath -Force | Out-Null }
           $openCodeBat = @(
             "@echo off",
-            "title OpenCode AI Assistant (Integrated with REA + Ollama)",
+            "title OpenCode AI Assistant (Integrated with REA)",
             "color 0A",
             "echo =======================================================================",
-            "echo   [+] OpenCode AI Agent + REA MCP + Local Ollama Engine",
+            "echo   [+] OpenCode AI Agent + REA Reverse Engineering MCP",
             "echo   [+] Type your prompt or coding task below:",
             "echo =======================================================================",
             "echo.",
@@ -251,28 +234,7 @@ jobs:
             "pause"
           )
           Set-Content -Path "$desktopPath\REA Tools.bat" -Value $reaBat -Encoding UTF8
-          $ollamaBat = @(
-            "@echo off",
-            "title Local AI Models Manager (Ollama)",
-            "color 0E",
-            "echo =======================================================================",
-            "echo   [+] Local AI Model Manager (Ollama)",
-            "echo   Available models: qwen2.5-coder:1.5b",
-            "echo   To chat locally: ollama run qwen2.5-coder:1.5b",
-            "echo =======================================================================",
-            "echo.",
-            "ollama list",
-            "cmd /k"
-          )
-          Set-Content -Path "$desktopPath\Local AI Models.bat" -Value $ollamaBat -Encoding UTF8
-          Write-Output "[+] OpenCode + REA + Ollama integrated successfully on Windows!"
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rdp-connection
-          path: rdp-connection.rdp
-          retention-days: 1
+          Write-Output "[+] OpenCode AI and REA integrated successfully on Windows!"
 
       - name: Keep Alive Session
         shell: pwsh
@@ -378,7 +340,7 @@ jobs:
           sudo sed -i '/^\[Xorg\]/,/^\[/ s/^password=.*/password=Fazah@123/' /etc/xrdp/xrdp.ini
 
       - name: Setup GUI Custom Themes and Apps
-        if: "endsWith(inputs.windows_version, '-gui')"
+        if: "endsWith(inputs.windows_version, '-gui') || endsWith(inputs.windows_version, '-gui-ai')"
         run: |
           echo "aW1wb3J0IG9zLCBzeXMsIHNodXRpbCwgdXJsbGliLnJlcXVlc3QKCmJnX2ZpbGUgPSAnL3Vzci9zaGFyZS9iYWNrZ3JvdW5kcy9kZXNrdG9wLWJnLnBuZycKb3MubWFrZWRpcnMoJy91c3Ivc2hhcmUvYmFja2dyb3VuZHMnLCBleGlzdF9vaz1UcnVlKQoKdXJsID0gJ2h0dHBzOi8vcmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbS9vd2VyZG9nYW4vd2FsbHBhcGVycy1mb3Ita2FsaS9tYWluL2thbGktY3lhbi9jeWFuLWthbGktbmVvbi0xNng5LnBuZycKdHJ5OgogICAgcmVxID0gdXJsbGliLnJlcXVlc3QuUmVxdWVzdCh1cmwsIGhlYWRlcnM9eydVc2VyLUFnZW50JzogJ01vemlsbGEvNS4wJ30pCiAgICB3aXRoIHVybGxpYi5yZXF1ZXN0LnVybG9wZW4ocmVxLCB0aW1lb3V0PTEyKSBhcyByZXNwLCBvcGVuKGJnX2ZpbGUsICd3YicpIGFzIG91dDoKICAgICAgICBvdXQud3JpdGUocmVzcC5yZWFkKCkpCmV4Y2VwdCBFeGNlcHRpb246CiAgICBwYXNzCgpmb3IgZCBpbiBbJy91c3Ivc2hhcmUvYmFja2dyb3VuZHMveGZjZScsICcvdXNyL3NoYXJlL2ltYWdlcy9kZXNrdG9wLWJhc2UnXToKICAgIG9zLm1ha2VkaXJzKGQsIGV4aXN0X29rPVRydWUpCmZvciBmYiBpbiBbJy91c3Ivc2hhcmUvYmFja2dyb3VuZHMveGZjZS94ZmNlLWJsdWUuanBnJywgJy91c3Ivc2hhcmUvYmFja2dyb3VuZHMveGZjZS94ZmNlLXRlYWwuanBnJywgJy91c3Ivc2hhcmUvaW1hZ2VzL2Rlc2t0b3AtYmFzZS9kZWZhdWx0J106CiAgICB0cnk6IHNodXRpbC5jb3B5ZmlsZShiZ19maWxlLCBmYikKICAgIGV4Y2VwdDogcGFzcwoKeG1sID0gJycnPD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGNoYW5uZWwgbmFtZT0ieGZjZTQtZGVza3RvcCIgdmVyc2lvbj0iMS4wIj4KICA8cHJvcGVydHkgbmFtZT0iYmFja2Ryb3AiIHR5cGU9ImVtcHR5Ij4KICAgIDxwcm9wZXJ0eSBuYW1lPSJzY3JlZW4wIiB0eXBlPSJlbXB0eSI+CiAgICAgIDxwcm9wZXJ0eSBuYW1lPSJtb25pdG9yMCIgdHlwZT0iZW1wdHkiPjxwcm9wZXJ0eSBuYW1lPSJ3b3Jrc3BhY2UwIiB0eXBlPSJlbXB0eSI+PHByb3BlcnR5IG5hbWU9ImltYWdlLXN0eWxlIiB0eXBlPSJpbnQiIHZhbHVlPSI1Ii8+PHByb3BlcnR5IG5hbWU9Imxhc3QtaW1hZ2UiIHR5cGU9InN0cmluZyIgdmFsdWU9Ii91c3Ivc2hhcmUvYmFja2dyb3VuZHMvZGVza3RvcC1iZy5wbmciLz48L3Byb3BlcnR5PjwvcHJvcGVydHk+CiAgICAgIDxwcm9wZXJ0eSBuYW1lPSJtb25pdG9yMSIgdHlwZT0iZW1wdHkiPjxwcm9wZXJ0eSBuYW1lPSJ3b3Jrc3BhY2UwIiB0eXBlPSJlbXB0eSI+PHByb3BlcnR5IG5hbWU9ImltYWdlLXN0eWxlIiB0eXBlPSJpbnQiIHZhbHVlPSI1Ii8+PHByb3BlcnR5IG5hbWU9Imxhc3QtaW1hZ2UiIHR5cGU9InN0cmluZyIgdmFsdWU9Ii91c3Ivc2hhcmUvYmFja2dyb3VuZHMvZGVza3RvcC1iZy5wbmciLz48L3Byb3BlcnR5PjwvcHJvcGVydHk+CiAgICAgIDxwcm9wZXJ0eSBuYW1lPSJtb25pdG9ycmRwMCIgdHlwZT0iZW1wdHkiPjxwcm9wZXJ0eSBuYW1lPSJ3b3Jrc3BhY2UwIiB0eXBlPSJlbXB0eSI+PHByb3BlcnR5IG5hbWU9ImltYWdlLXN0eWxlIiB0eXBlPSJpbnQiIHZhbHVlPSI1Ii8+PHByb3BlcnR5IG5hbWU9Imxhc3QtaW1hZ2UiIHR5cGU9InN0cmluZyIgdmFsdWU9Ii91c3Ivc2hhcmUvYmFja2dyb3VuZHMvZGVza3RvcC1iZy5wbmciLz48L3Byb3BlcnR5PjwvcHJvcGVydHk+CiAgICA8L3Byb3BlcnR5PgogIDwvcHJvcGVydHk+CjwvY2hhbm5lbD4nJycKCmZvciB4ZCBpbiBbJy9ldGMveGRnL3hmY2U0L3hmY29uZi94ZmNlLXBlcmNoYW5uZWwteG1sJywgJy9ob21lL3J1bm5lci8uY29uZmlnL3hmY2U0L3hmY29uZi94ZmNlLXBlcmNoYW5uZWwteG1sJ106CiAgICBvcy5tYWtlZGlycyh4ZCwgZXhpc3Rfb2s9VHJ1ZSkKICAgIHdpdGggb3Blbihvcy5wYXRoLmpvaW4oeGQsICd4ZmNlNC1kZXNrdG9wLnhtbCcpLCAndycpIGFzIGY6CiAgICAgICAgZi53cml0ZSh4bWwpCgpkZCA9ICcvaG9tZS9ydW5uZXIvRGVza3RvcCcKb3MubWFrZWRpcnMoZGQsIGV4aXN0X29rPVRydWUpCmRlZiBhZGRfaWNvbihmbiwgbmFtZSwgY21kLCBpY29uKToKICAgIHAgPSBvcy5wYXRoLmpvaW4oZGQsIGZuKQogICAgd2l0aCBvcGVuKHAsICd3JykgYXMgZjoKICAgICAgICBmLndyaXRlKGYnW0Rlc2t0b3AgRW50cnldXG5WZXJzaW9uPTEuMFxuVHlwZT1BcHBsaWNhdGlvblxuTmFtZT17bmFtZX1cbkV4ZWM9e2NtZH1cbkljb249e2ljb259XG5UZXJtaW5hbD1mYWxzZVxuJykKICAgIG9zLmNobW9kKHAsIDBvNzU1KQoKYWRkX2ljb24oJzAxLWthbGktdGVybS5kZXNrdG9wJywgJ/CfkIkgS2FsaSBSb290IFRlcm1pbmFsJywgJ3hmY2U0LXRlcm1pbmFsIC0tdGl0bGU9IvCfkIkgS2FsaSBUZXJtaW5hbCAoUm9vdCkiJywgJ3V0aWxpdGllcy10ZXJtaW5hbCcpCmFkZF9pY29uKCcwMi1ubWFwLmRlc2t0b3AnLCAn4pqU77iPIE5tYXAgTmV0d29yayBTY2FubmVyJywgJ3hmY2U0LXRlcm1pbmFsIC1lICJiYXNoIC1jIFwnbm1hcCAtLWhlbHAgfCBoZWFkIC1uIDMwOyBleGVjIGJhc2hcJyInLCAnbmV0d29yay13aXJlZCcpCmFkZF9pY29uKCcwMy13aXJlc2hhcmsuZGVza3RvcCcsICfwn6aIIFdpcmVzaGFyayBBbmFseXplcicsICd3aXJlc2hhcmsnLCAnYXBwbGljYXRpb25zLWludGVybmV0JykKYWRkX2ljb24oJzA0LXNxbG1hcC5kZXNrdG9wJywgJ/CfkokgU1FMTWFwIERhdGFiYXNlIFRvb2wnLCAneGZjZTQtdGVybWluYWwgLWUgImJhc2ggLWMgXCdzcWxtYXAgLS12ZXJzaW9uOyBleGVjIGJhc2hcJyInLCAndXRpbGl0aWVzLXRlcm1pbmFsJykKYWRkX2ljb24oJzA1LWpvaG4uZGVza3RvcCcsICfwn5SRIEpvaG4gVGhlIFJpcHBlcicsICd4ZmNlNC10ZXJtaW5hbCAtZSAiYmFzaCAtYyBcJ2pvaG47IGV4ZWMgYmFzaFwnIicsICd1dGlsaXRpZXMtdGVybWluYWwnKQphZGRfaWNvbignMDYtaHlkcmEuZGVza3RvcCcsICfimqEgVEhDIEh5ZHJhIEJydXRlcicsICd4ZmNlNC10ZXJtaW5hbCAtZSAiYmFzaCAtYyBcJ2h5ZHJhIC1oIHwgaGVhZCAtbiAyNTsgZXhlYyBiYXNoXCciJywgJ3V0aWxpdGllcy10ZXJtaW5hbCcpCmFkZF9pY29uKCcwNy1haXJjcmFjay5kZXNrdG9wJywgJ/Cfk6EgQWlyY3JhY2stbmcgV2lGaScsICd4ZmNlNC10ZXJtaW5hbCAtZSAiYmFzaCAtYyBcJ2FpcmNyYWNrLW5nIC0taGVscCB8IGhlYWQgLW4gMjU7IGV4ZWMgYmFzaFwnIicsICduZXR3b3JrLXdpcmVsZXNzJykKYWRkX2ljb24oJzA4LW5pa3RvLmRlc2t0b3AnLCAn8J+UjSBOaWt0byBXZWIgU2Nhbm5lcicsICd4ZmNlNC10ZXJtaW5hbCAtZSAiYmFzaCAtYyBcJ25pa3RvIC1IOyBleGVjIGJhc2hcJyInLCAnbmV0d29yay13aXJlZCcpCmFkZF9pY29uKCcwOS1nb2J1c3Rlci5kZXNrdG9wJywgJ/CfmoAgR29idXN0ZXIgRGlyZWN0b3J5JywgJ3hmY2U0LXRlcm1pbmFsIC1lICJiYXNoIC1jIFwnZ29idXN0ZXIgLWggfCBoZWFkIC1uIDI1OyBleGVjIGJhc2hcJyInLCAndXRpbGl0aWVzLXRlcm1pbmFsJykKYWRkX2ljb24oJzEwLXdvcmRsaXN0cy5kZXNrdG9wJywgJ/Cfk4EgU2VjTGlzdHMgJiBXb3JkbGlzdHMnLCAndGh1bmFyIC91c3Ivc2hhcmUvd29yZGxpc3RzJywgJ3N5c3RlbS1maWxlLW1hbmFnZXInKQphZGRfaWNvbignMTEtYnJvd3Nlci5kZXNrdG9wJywgJ/CfjJAgQ3liZXIgQnJvd3NlcicsICd4LXd3dy1icm93c2VyJywgJ3dlYi1icm93c2VyJykK" | base64 -d | python3 || true
 
@@ -417,33 +379,25 @@ jobs:
           echo 'echo "========================================================="' >> /home/runner/.bashrc
           echo "TARGET_PORT=22" >> $GITHUB_ENV
 
-      - name: Install and Configure OpenCode AI with REA and Ollama (Ubuntu AI Edition)
+      - name: Install and Configure OpenCode AI with REA (Ubuntu AI Edition)
         if: "inputs.windows_version == 'ubuntu22-ai' || inputs.windows_version == 'ubuntu24-ai' || endsWith(inputs.windows_version, '-gui-ai')"
         run: |
-          echo "[*] Setting up Integrated AI Environment (OpenCode + REA + Ollama) on Ubuntu..."
+          echo "[*] Setting up Integrated AI Environment (OpenCode + REA) on Ubuntu..."
           sudo npm install -g opencode-ai rea-agents || curl -fsSL https://opencode.ai/install | bash || true
           sudo ln -sf $(which rea-agents) /usr/local/bin/rea 2>/dev/null || true
-          echo "[*] Installing Ollama local AI engine..."
-          curl -fsSL https://ollama.com/install.sh | sh || true
-          nohup ollama serve > /tmp/ollama.log 2>&1 &
-          sleep 4
-          echo "[*] Pulling Qwen 2.5 Coder 1.5B model for offline AI..."
-          ollama pull qwen2.5-coder:1.5b || true
           mkdir -p /home/runner/.config/opencode /home/runner
-          echo '{"$schema":"https://opencode.ai/config.json","provider":{"ollama":{"npm":"@ai-sdk/openai-compatible","name":"Ollama (Local AI)","options":{"baseURL":"http://127.0.0.1:11434/v1"}}},"mcp":{"rea":{"type":"local","command":["npx","-y","rea-agents","mcp"],"enabled":true}}}' | tee /home/runner/.config/opencode/opencode.json /home/runner/opencode.json > /dev/null
+          echo '{"$schema":"https://opencode.ai/config.json","mcp":{"rea":{"type":"local","command":["npx","-y","rea-agents","mcp"],"enabled":true}}}' | tee /home/runner/.config/opencode/opencode.json /home/runner/opencode.json > /dev/null
           sudo chown -R runner:runner /home/runner/.config /home/runner/opencode.json
           echo 'echo "======================================================================="' >> /home/runner/.bashrc
-          echo 'echo " [AI] Welcome to AI Developer Cloud (OpenCode + REA + Ollama)"' >> /home/runner/.bashrc
-          echo 'echo " [*] OpenCode AI Agent:   Type '''opencode''' (Integrated with REA + Ollama)"' >> /home/runner/.bashrc
+          echo 'echo " [AI] Welcome to AI Developer Cloud (OpenCode + REA)"' >> /home/runner/.bashrc
+          echo 'echo " [*] OpenCode AI Agent:   Type '''opencode''' (Integrated with REA MCP)"' >> /home/runner/.bashrc
           echo 'echo " [*] REA Reverse Eng:     Type '''rea''' or '''rea-agents'''"' >> /home/runner/.bashrc
-          echo 'echo " [*] Local AI Engine:      Type '''ollama list''' or '''ollama run qwen2.5-coder:1.5b'''"' >> /home/runner/.bashrc
           echo 'echo "======================================================================="' >> /home/runner/.bashrc
           echo 'alias rea="rea-agents"' >> /home/runner/.bashrc
           if [[ "${{ inputs.windows_version }}" =~ -gui-ai$ ]]; then
             mkdir -p /home/runner/Desktop
             printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=OpenCode AI + REA\nComment=AI Coding Assistant\nExec=xfce4-terminal -e "opencode"\nIcon=utilities-terminal\nPath=/home/runner\nTerminal=false\nStartupNotify=true\n' > /home/runner/Desktop/OpenCode.desktop
             printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=REA Agent\nComment=Reverse Engineer Anything\nExec=xfce4-terminal -e "rea-agents"\nIcon=utilities-terminal\nPath=/home/runner\nTerminal=false\nStartupNotify=true\n' > /home/runner/Desktop/REA-Agent.desktop
-            printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=Local AI (Ollama)\nComment=Local AI Models\nExec=xfce4-terminal -e "ollama run qwen2.5-coder:1.5b"\nIcon=utilities-terminal\nPath=/home/runner\nTerminal=false\nStartupNotify=true\n' > /home/runner/Desktop/Local-AI.desktop
             chmod +x /home/runner/Desktop/*.desktop
             sudo chown -R runner:runner /home/runner/Desktop
           fi
