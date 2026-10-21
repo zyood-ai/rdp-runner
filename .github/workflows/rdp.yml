@@ -169,48 +169,103 @@ jobs:
             "redirectclipboard:i:1"
           ) | Out-File -FilePath rdp-connection.rdp -Encoding ascii
 
-      - name: Install OpenCode AI and REA Tools (Windows AI Edition)
+      - name: Install and Configure OpenCode AI with REA and Ollama (Windows AI Edition)
         if: "inputs.windows_version == 'win2022-ai' || inputs.windows_version == 'win2025-ai'"
         shell: pwsh
         run: |
-          Write-Output "[*] Installing OpenCode AI Agent and REA Framework on Windows..."
+          Write-Output "[*] Setting up Integrated AI Environment (OpenCode + REA + Ollama)..."
           try {
             npm install -g opencode-ai rea-agents --force
           } catch {
-            Write-Output "[!] NPM install error: $_"
+            Write-Output "[!] NPM install warning: $_"
           }
-          
+          try {
+            Write-Output "[*] Installing Ollama local AI engine..."
+            Invoke-WebRequest "https://ollama.com/download/OllamaSetup.exe" -OutFile "$env:TEMP\OllamaSetup.exe" -UseBasicParsing
+            Start-Process "$env:TEMP\OllamaSetup.exe" -ArgumentList "/silent" -Wait
+            $ollamaPath = "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe"
+            if (Test-Path $ollamaPath) {
+              $env:PATH += ";$env:LOCALAPPDATA\Programs\Ollama"
+              Start-Process $ollamaPath -ArgumentList "serve" -WindowStyle Hidden
+              Start-Sleep -Seconds 3
+              Write-Output "[*] Pulling Qwen 2.5 Coder lightweight model for offline AI..."
+              & $ollamaPath pull qwen2.5-coder:1.5b
+            }
+          } catch {
+            Write-Output "[!] Ollama setup note: $_"
+          }
+          $cfg = @{
+            "`$schema" = "https://opencode.ai/config.json"
+            provider = @{
+              ollama = @{
+                npm = "@ai-sdk/openai-compatible"
+                name = "Ollama (Local AI)"
+                options = @{
+                  baseURL = "http://127.0.0.1:11434/v1"
+                }
+              }
+            }
+            mcp = @{
+              rea = @{
+                type = "local"
+                command = @("npx", "-y", "rea-agents", "mcp")
+                enabled = $true
+              }
+            }
+          } | ConvertTo-Json -Depth 5
+          $targetDirs = @(
+            "C:\Users\runneradmin\.config\opencode",
+            "C:\Users\runneradmin\AppData\Roaming\opencode",
+            "C:\Users\runneradmin"
+          )
+          foreach ($d in $targetDirs) {
+            if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+            Set-Content -Path "$d\opencode.json" -Value $cfg -Encoding UTF8
+          }
           $desktopPath = "C:\Users\runneradmin\Desktop"
           if (-not (Test-Path $desktopPath)) { New-Item -ItemType Directory -Path $desktopPath -Force | Out-Null }
-          
-          $openCodeBat = @"
-          @echo off
-          title OpenCode AI Assistant
-          color 0A
-          echo ========================================================
-          echo   [+] OpenCode AI Coding Agent (Ready to Code!)
-          echo ========================================================
-          echo.
-          cd /d C:\Users\runneradmin
-          call opencode
-          pause
-          "@
+          $openCodeBat = @(
+            "@echo off",
+            "title OpenCode AI Assistant (Integrated with REA + Ollama)",
+            "color 0A",
+            "echo =======================================================================",
+            "echo   [+] OpenCode AI Agent + REA MCP + Local Ollama Engine",
+            "echo   [+] Type your prompt or coding task below:",
+            "echo =======================================================================",
+            "echo.",
+            "cd /d C:\Users\runneradmin",
+            "call opencode",
+            "pause"
+          )
           Set-Content -Path "$desktopPath\OpenCode AI.bat" -Value $openCodeBat -Encoding UTF8
-          
-          $reaBat = @"
-          @echo off
-          title REA Reverse Engineering Agent
-          color 0B
-          echo ========================================================
-          echo   [+] REA - Reverse Engineer Anything (Ready!)
-          echo ========================================================
-          echo.
-          cd /d C:\Users\runneradmin
-          call rea-agents
-          pause
-          "@
+          $reaBat = @(
+            "@echo off",
+            "title REA Reverse Engineering Agent",
+            "color 0B",
+            "echo =======================================================================",
+            "echo   [+] REA - Reverse Engineer Anything (MCP Engine)",
+            "echo =======================================================================",
+            "echo.",
+            "cd /d C:\Users\runneradmin",
+            "call rea-agents",
+            "pause"
+          )
           Set-Content -Path "$desktopPath\REA Tools.bat" -Value $reaBat -Encoding UTF8
-          Write-Output "[+] OpenCode and REA AI environment ready on Desktop!"
+          $ollamaBat = @(
+            "@echo off",
+            "title Local AI Models Manager (Ollama)",
+            "color 0E",
+            "echo =======================================================================",
+            "echo   [+] Local AI Model Manager (Ollama)",
+            "echo   Available models: qwen2.5-coder:1.5b",
+            "echo   To chat locally: ollama run qwen2.5-coder:1.5b",
+            "echo =======================================================================",
+            "echo.",
+            "ollama list",
+            "cmd /k"
+          )
+          Set-Content -Path "$desktopPath\Local AI Models.bat" -Value $ollamaBat -Encoding UTF8
+          Write-Output "[+] OpenCode + REA + Ollama integrated successfully on Windows!"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -345,40 +400,6 @@ jobs:
           sudo systemctl restart xrdp || sudo service xrdp restart || true
           echo "TARGET_PORT=3389" >> $GITHUB_ENV
 
-      - name: Install OpenCode and REA on Ubuntu GUI Desktop
-        if: "endsWith(inputs.windows_version, '-gui-ai')"
-        run: |
-          echo "[*] Installing OpenCode AI and REA for Desktop GUI..."
-          sudo npm install -g opencode-ai rea-agents || curl -fsSL https://opencode.ai/install | bash || true
-          sudo ln -sf $(which rea-agents) /usr/local/bin/rea 2>/dev/null || true
-          mkdir -p /home/runner/Desktop
-          cat << 'EOF' > /home/runner/Desktop/OpenCode.desktop
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=🤖 OpenCode AI Agent
-Comment=AI Coding Assistant
-Exec=xfce4-terminal -e "opencode"
-Icon=utilities-terminal
-Path=/home/runner
-Terminal=false
-StartupNotify=true
-EOF
-          cat << 'EOF' > /home/runner/Desktop/REA-Agent.desktop
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=🔍 REA Agent
-Comment=Reverse Engineer Anything
-Exec=xfce4-terminal -e "rea-agents"
-Icon=utilities-terminal
-Path=/home/runner
-Terminal=false
-StartupNotify=true
-EOF
-          chmod +x /home/runner/Desktop/*.desktop
-          sudo chown -R runner:runner /home/runner/Desktop
-
       - name: Setup Native Ubuntu VPS SSH
         if: "(startsWith(inputs.windows_version, 'ubuntu') || startsWith(inputs.windows_version, 'ubuntu2')) && !contains(inputs.windows_version, '-gui') && inputs.windows_version != 'android-cloud' && inputs.windows_version != 'ai-dev'"
         run: |
@@ -396,18 +417,37 @@ EOF
           echo 'echo "========================================================="' >> /home/runner/.bashrc
           echo "TARGET_PORT=22" >> $GITHUB_ENV
 
-      - name: Install OpenCode and REA on Ubuntu SSH VPS
-        if: "inputs.windows_version == 'ubuntu22-ai' || inputs.windows_version == 'ubuntu24-ai'"
+      - name: Install and Configure OpenCode AI with REA and Ollama (Ubuntu AI Edition)
+        if: "inputs.windows_version == 'ubuntu22-ai' || inputs.windows_version == 'ubuntu24-ai' || endsWith(inputs.windows_version, '-gui-ai')"
         run: |
-          echo "[*] Installing OpenCode AI and REA on Ubuntu SSH VPS..."
+          echo "[*] Setting up Integrated AI Environment (OpenCode + REA + Ollama) on Ubuntu..."
           sudo npm install -g opencode-ai rea-agents || curl -fsSL https://opencode.ai/install | bash || true
           sudo ln -sf $(which rea-agents) /usr/local/bin/rea 2>/dev/null || true
-          echo 'echo "========================================================="' >> /home/runner/.bashrc
-          echo 'echo " 🤖 Welcome to Ubuntu AI & REA VPS (Root Access)"' >> /home/runner/.bashrc
-          echo 'echo " 🧠 OpenCode AI Agent: Just type '''opencode'''"' >> /home/runner/.bashrc
-          echo 'echo " 🔍 REA (Reverse Engineer Anything): Just type '''rea''' or '''rea-agents'''"' >> /home/runner/.bashrc
-          echo 'echo "========================================================="' >> /home/runner/.bashrc
+          echo "[*] Installing Ollama local AI engine..."
+          curl -fsSL https://ollama.com/install.sh | sh || true
+          nohup ollama serve > /tmp/ollama.log 2>&1 &
+          sleep 4
+          echo "[*] Pulling Qwen 2.5 Coder 1.5B model for offline AI..."
+          ollama pull qwen2.5-coder:1.5b || true
+          mkdir -p /home/runner/.config/opencode /home/runner
+          echo '{"$schema":"https://opencode.ai/config.json","provider":{"ollama":{"npm":"@ai-sdk/openai-compatible","name":"Ollama (Local AI)","options":{"baseURL":"http://127.0.0.1:11434/v1"}}},"mcp":{"rea":{"type":"local","command":["npx","-y","rea-agents","mcp"],"enabled":true}}}' | tee /home/runner/.config/opencode/opencode.json /home/runner/opencode.json > /dev/null
+          sudo chown -R runner:runner /home/runner/.config /home/runner/opencode.json
+          echo 'echo "======================================================================="' >> /home/runner/.bashrc
+          echo 'echo " [AI] Welcome to AI Developer Cloud (OpenCode + REA + Ollama)"' >> /home/runner/.bashrc
+          echo 'echo " [*] OpenCode AI Agent:   Type '''opencode''' (Integrated with REA + Ollama)"' >> /home/runner/.bashrc
+          echo 'echo " [*] REA Reverse Eng:     Type '''rea''' or '''rea-agents'''"' >> /home/runner/.bashrc
+          echo 'echo " [*] Local AI Engine:      Type '''ollama list''' or '''ollama run qwen2.5-coder:1.5b'''"' >> /home/runner/.bashrc
+          echo 'echo "======================================================================="' >> /home/runner/.bashrc
           echo 'alias rea="rea-agents"' >> /home/runner/.bashrc
+          if [[ "${{ inputs.windows_version }}" =~ -gui-ai$ ]]; then
+            mkdir -p /home/runner/Desktop
+            printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=OpenCode AI + REA\nComment=AI Coding Assistant\nExec=xfce4-terminal -e "opencode"\nIcon=utilities-terminal\nPath=/home/runner\nTerminal=false\nStartupNotify=true\n' > /home/runner/Desktop/OpenCode.desktop
+            printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=REA Agent\nComment=Reverse Engineer Anything\nExec=xfce4-terminal -e "rea-agents"\nIcon=utilities-terminal\nPath=/home/runner\nTerminal=false\nStartupNotify=true\n' > /home/runner/Desktop/REA-Agent.desktop
+            printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=Local AI (Ollama)\nComment=Local AI Models\nExec=xfce4-terminal -e "ollama run qwen2.5-coder:1.5b"\nIcon=utilities-terminal\nPath=/home/runner\nTerminal=false\nStartupNotify=true\n' > /home/runner/Desktop/Local-AI.desktop
+            chmod +x /home/runner/Desktop/*.desktop
+            sudo chown -R runner:runner /home/runner/Desktop
+          fi
+          echo "[+] Integrated AI Environment Ready on Ubuntu!"
 
       - name: Setup Containerized Distro VPS SSH
         if: "!startsWith(inputs.windows_version, 'ubuntu') && !startsWith(inputs.windows_version, 'ubuntu2') && !endsWith(inputs.windows_version, '-gui') && !endsWith(inputs.windows_version, '-gui-ai') && inputs.windows_version != 'android-cloud' && inputs.windows_version != 'ai-dev'"
