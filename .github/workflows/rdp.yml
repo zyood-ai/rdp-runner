@@ -180,7 +180,7 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: |
-          Write-Output "[*] Setting up Integrated AI Environment (OpenCode + REA)..."
+          Write-Output "[*] Setting up Integrated AI Environment (OpenCode + REA with Full Arabic Support)..."
           try {
             npm install -g opencode-ai @opencode/cli rea-agents --force
             $npmPrefix = (npm config get prefix).Trim()
@@ -192,8 +192,36 @@ jobs:
             Write-Output "[!] NPM install warning: $_"
           }
           try {
+            # 1. Configure System Console for Full UTF-8 & Arabic Rendering
+            reg add "HKCU\Console" /v CodePage /t REG_DWORD /d 65001 /f | Out-Null
+            reg add "HKCU\Console" /v VirtualTerminalLevel /t REG_DWORD /d 1 /f | Out-Null
+            reg add "HKCU\Console" /v FaceName /t REG_SZ /d "Consolas" /f | Out-Null
+            
+            # 2. Add Arabic (101) Keyboard Layout with Alt+Shift toggle for Fazah and all users
+            $regPreload = "HKCU:\Keyboard Layout\Preload"
+            if (-not (Test-Path $regPreload)) { New-Item -Path $regPreload -Force | Out-Null }
+            Set-ItemProperty -Path $regPreload -Name "1" -Value "00000409" -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path $regPreload -Name "2" -Value "00000401" -ErrorAction SilentlyContinue
+            
+            New-Item -Path "Registry::HKEY_USERS\.DEFAULT\Keyboard Layout\Preload" -Force -ErrorAction SilentlyContinue | Out-Null
+            Set-ItemProperty -Path "Registry::HKEY_USERS\.DEFAULT\Keyboard Layout\Preload" -Name "1" -Value "00000409" -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path "Registry::HKEY_USERS\.DEFAULT\Keyboard Layout\Preload" -Name "2" -Value "00000401" -ErrorAction SilentlyContinue
+            
+            # 3. Create Arabic Language Rules & AGENTS.md for Seamless Connected Arabic
+            $arabicRules = @(
+              '# Full Arabic Language Support & Proper Text Rendering',
+              '- Native Connected Arabic: When the user asks or writes in Arabic, always communicate and reply in fluent, natural, grammatically correct Arabic (اللغة العربية الفصحى السليمة).',
+              '- No Letter Disconnection: NEVER output separated or spaced Arabic letters (e.g. NEVER write "م ر ح ب ا", ALWAYS write "مرحبا").',
+              '- No Manual Reversal: NEVER reverse the character order of Arabic words or sentences. Do not attempt manual RTL reversal.',
+              '- Standard Unicode: Always output standard Arabic Unicode characters (U+0600 to U+06FF). Never use broken presentation forms.',
+              '- Clean Code Explanations: Keep code keywords in English while providing clear, beautifully connected Arabic explanations and comments.'
+            ) -join "`r`n"
+            
             $cfg = @{
               "`$schema" = "https://opencode.ai/config.json"
+              instructions = @(
+                "C:\Users\Public\.config\opencode\arabic_rules.md"
+              )
               mcp = @{
                 rea = @{
                   type = "local"
@@ -202,6 +230,7 @@ jobs:
                 }
               }
             } | ConvertTo-Json -Depth 5
+            
             $targetDirs = @(
               "C:\Users\Public\.config\opencode",
               "C:\Users\Fazah\.config\opencode",
@@ -215,13 +244,21 @@ jobs:
             foreach ($d in $targetDirs) {
               if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
               Set-Content -Path "$d\opencode.json" -Value $cfg -Encoding UTF8
+              Set-Content -Path "$d\arabic_rules.md" -Value $arabicRules -Encoding UTF8
+              Set-Content -Path "$d\AGENTS.md" -Value $arabicRules -Encoding UTF8
             }
+            
+            # 4. UTF-8 Enabled Batch Launchers (chcp 65001)
             $openCodeBat = @(
               '@echo off',
-              'title OpenCode AI Assistant (Integrated with REA)',
+              'chcp 65001 >nul',
+              'set PYTHONIOENCODING=utf-8',
+              'set LANG=en_US.UTF-8',
+              'title OpenCode AI Assistant (Full Arabic & UTF-8 Supported)',
               'color 0A',
               'echo =======================================================================',
               'echo   [+] OpenCode AI Agent + REA Reverse Engineering MCP',
+              'echo   [+] Full Arabic Language & Connected Text Enabled (Alt+Shift)',
               'echo   [+] Official Website: https://opencode.ai/ar',
               'echo =======================================================================',
               'echo.',
@@ -236,10 +273,14 @@ jobs:
             )
             $reaBat = @(
               '@echo off',
-              'title REA Reverse Engineering Agent',
+              'chcp 65001 >nul',
+              'set PYTHONIOENCODING=utf-8',
+              'set LANG=en_US.UTF-8',
+              'title REA Reverse Engineering Agent (Full Arabic & UTF-8 Supported)',
               'color 0B',
               'echo =======================================================================',
               'echo   [+] REA - Reverse Engineer Anything (MCP Engine)',
+              'echo   [+] Full Arabic Language & Connected Text Enabled (Alt+Shift)',
               'echo =======================================================================',
               'echo.',
               'cd /d "%USERPROFILE%"',
@@ -264,7 +305,7 @@ jobs:
               Set-Content -Path "$dp\REA Agent.bat" -Value $reaBat -Encoding UTF8
               Set-Content -Path "$dp\OpenCode Official.url" -Value $urlContent -Encoding ASCII
             }
-            Write-Output "[+] OpenCode AI and REA shortcuts created on all desktop profiles (Public, Fazah, runneradmin)!"
+            Write-Output "[+] OpenCode AI and REA shortcuts (Full Arabic UTF-8) created on all desktop profiles!"
           } catch {
             Write-Output "[!] Desktop shortcuts note: $_"
           }
@@ -415,31 +456,46 @@ jobs:
       - name: Install and Configure OpenCode AI with REA (Linux VPS & GUI)
         continue-on-error: true
         run: |
-          echo "[*] Setting up Integrated AI Environment (OpenCode + REA) on Linux..."
+          echo "[*] Setting up Integrated AI Environment (OpenCode + REA with Full Arabic Support)..."
           sudo npm install -g opencode-ai @opencode/cli rea-agents --force || curl -fsSL https://opencode.ai/install | bash || true
           sudo ln -sf $(which rea-agents 2>/dev/null || which rea 2>/dev/null) /usr/local/bin/rea 2>/dev/null || true
           sudo ln -sf $(which opencode 2>/dev/null) /usr/local/bin/opencode 2>/dev/null || true
           
-          # Setup OpenCode Config with REA MCP for all user profiles
+          # Install Arabic Fonts and Language Pack for Perfect Arabic Glyphs & Ligatures
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            fonts-noto-core fonts-arabeyes fonts-sil-scheherazade fonts-dejavu-core language-pack-ar 2>/dev/null || true
+          
+          # Configure Arabic Instructions & AGENTS.md for All Profiles
+          echo "IyBGdWxsIEFyYWJpYyBMYW5ndWFnZSBTdXBwb3J0ICYgUHJvcGVyIFRleHQgUmVuZGVyaW5nCi0gTmF0aXZlIENvbm5lY3RlZCBBcmFiaWM6IFdoZW4gdGhlIHVzZXIgYXNrcyBvciB3cml0ZXMgaW4gQXJhYmljLCBhbHdheXMgY29tbXVuaWNhdGUgYW5kIHJlcGx5IGluIGZsdWVudCwgbmF0dXJhbCwgZ3JhbW1hdGljYWxseSBjb3JyZWN0IEFyYWJpYyAo2KfZhNmE2LrYqSDYp9mE2LnYsdio2YrYqSDYp9mE2YHYtdit2Ykg2KfZhNiz2YTZitmF2KkpLgotIE5vIExldHRlciBEaXNjb25uZWN0aW9uOiBORVZFUiBvdXRwdXQgc2VwYXJhdGVkIG9yIHNwYWNlZCBBcmFiaWMgbGV0dGVycyAoZS5nLiBORVZFUiB3cml0ZSAi2YUg2LEg2K0g2Kgg2KciLCBBTFdBWVMgd3JpdGUgItmF2LHYrdio2KciKS4KLSBObyBNYW51YWwgUmV2ZXJzYWw6IE5FVkVSIHJldmVyc2UgdGhlIGNoYXJhY3RlciBvcmRlciBvZiBBcmFiaWMgd29yZHMgb3Igc2VudGVuY2VzLiBEbyBub3QgYXR0ZW1wdCBtYW51YWwgUlRMIHJldmVyc2FsLgotIFN0YW5kYXJkIFVuaWNvZGU6IEFsd2F5cyBvdXRwdXQgc3RhbmRhcmQgQXJhYmljIFVuaWNvZGUgY2hhcmFjdGVycyAoVSswNjAwIHRvIFUrMDZGRikuIE5ldmVyIHVzZSBicm9rZW4gcHJlc2VudGF0aW9uIGZvcm1zLgotIENsZWFuIENvZGUgRXhwbGFuYXRpb25zOiBLZWVwIGNvZGUga2V5d29yZHMgaW4gRW5nbGlzaCB3aGlsZSBwcm92aWRpbmcgY2xlYXIsIGJlYXV0aWZ1bGx5IGNvbm5lY3RlZCBBcmFiaWMgZXhwbGFuYXRpb25zIGFuZCBjb21tZW50cy4=" | base64 -d | sudo tee /tmp/arabic_rules.md > /dev/null
+          
+          # Setup OpenCode Config with REA MCP and Arabic Instructions for all user profiles
           for p in /home/runner /root /etc/skel; do
             sudo mkdir -p "$p/.config/opencode"
-            echo '{"$schema":"https://opencode.ai/config.json","mcp":{"rea":{"type":"local","command":["npx","-y","rea-agents","mcp"],"enabled":true}}}' | sudo tee "$p/.config/opencode/opencode.json" "$p/opencode.json" > /dev/null
-            sudo chown -R runner:runner "$p/.config" "$p/opencode.json" 2>/dev/null || true
+            sudo cp /tmp/arabic_rules.md "$p/.config/opencode/arabic_rules.md"
+            sudo cp /tmp/arabic_rules.md "$p/AGENTS.md"
+            echo '{"$schema":"https://opencode.ai/config.json","instructions":["'"$p"'/.config/opencode/arabic_rules.md"],"mcp":{"rea":{"type":"local","command":["npx","-y","rea-agents","mcp"],"enabled":true}}}' | sudo tee "$p/.config/opencode/opencode.json" "$p/opencode.json" > /dev/null
+            sudo chown -R runner:runner "$p/.config" "$p/opencode.json" "$p/AGENTS.md" 2>/dev/null || true
             
-            # Aliases & Banner
+            # Aliases, Environment & Arabic UTF-8 Banner
             sudo touch "$p/.bashrc"
+            echo 'export LANG=en_US.UTF-8' | sudo tee -a "$p/.bashrc" > /dev/null
+            echo 'export LC_ALL=en_US.UTF-8' | sudo tee -a "$p/.bashrc" > /dev/null
+            echo 'export PYTHONIOENCODING=utf-8' | sudo tee -a "$p/.bashrc" > /dev/null
             echo 'alias rea="rea-agents"' | sudo tee -a "$p/.bashrc" > /dev/null
             echo 'alias opencode="opencode"' | sudo tee -a "$p/.bashrc" > /dev/null
             echo 'echo "======================================================================="' | sudo tee -a "$p/.bashrc" > /dev/null
-            echo 'echo " 🤖 OpenCode AI Agent + REA Reverse Engineering MCP Ready!"' | sudo tee -a "$p/.bashrc" > /dev/null
-            echo 'echo " [*] OpenCode AI Agent:   Type '''opencode''' (Integrated with REA MCP)"' | sudo tee -a "$p/.bashrc" > /dev/null
+            echo 'echo " 🤖 OpenCode AI Agent + REA MCP (Full Arabic Support Ready!)"' | sudo tee -a "$p/.bashrc" > /dev/null
+            echo 'echo " [*] OpenCode AI:         Type '''opencode''' (نظام برمجة وكتابة أكواد متصل)"' | sudo tee -a "$p/.bashrc" > /dev/null
             echo 'echo " [*] REA Reverse Eng:     Type '''rea''' or '''rea-agents'''"' | sudo tee -a "$p/.bashrc" > /dev/null
+            echo 'echo " [*] Arabic Language:     مفعل بالكامل بدون تقطيع للأحرف"' | sudo tee -a "$p/.bashrc" > /dev/null
             echo 'echo " [*] Official Arabic:     https://opencode.ai/ar"' | sudo tee -a "$p/.bashrc" > /dev/null
             echo 'echo "======================================================================="' | sudo tee -a "$p/.bashrc" > /dev/null
           done
           
-          # GUI Desktop Shortcuts
+          # GUI Desktop Shortcuts & Alt+Shift Arabic Toggle
           if [[ "${{ inputs.windows_version }}" =~ -gui || "${{ inputs.windows_version }}" =~ -gui-ai || "${{ inputs.windows_version }}" == "android-cloud" || "${{ inputs.windows_version }}" == "ai-dev" ]]; then
+            sudo setxkbmap -layout us,ar -option grp:alt_shift_toggle 2>/dev/null || true
+            echo "setxkbmap -layout us,ar -option grp:alt_shift_toggle" | sudo tee -a /home/runner/.xsessionrc /home/runner/.bashrc > /dev/null
             for dp in /home/runner/Desktop /root/Desktop /etc/skel/Desktop; do
               sudo mkdir -p "$dp"
               printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=OpenCode AI\nComment=AI Coding Assistant (https://opencode.ai)\nExec=xfce4-terminal -e "opencode"\nIcon=utilities-terminal\nPath=/home/runner\nTerminal=false\nStartupNotify=true\n' | sudo tee "$dp/OpenCode.desktop" > /dev/null
@@ -449,7 +505,7 @@ jobs:
               sudo chown -R runner:runner "$dp" 2>/dev/null || true
             done
           fi
-          echo "[+] Integrated AI Environment (OpenCode + REA) Ready on Linux!" 
+          echo "[+] Integrated AI Environment (OpenCode + REA with Full Arabic Support) Ready on Linux!" 
 
       - name: Setup Containerized Distro VPS SSH
         if: "!startsWith(inputs.windows_version, 'ubuntu') && !startsWith(inputs.windows_version, 'ubuntu2') && !endsWith(inputs.windows_version, '-gui') && !endsWith(inputs.windows_version, '-gui-ai') && inputs.windows_version != 'android-cloud' && inputs.windows_version != 'ai-dev'"
