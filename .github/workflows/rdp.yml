@@ -107,6 +107,26 @@ jobs:
           cmd.exe /c "net localgroup `"Remote Desktop Users`" Fazah /add"
           cmd.exe /c "net user runneradmin Fazah@123 /active:yes"
 
+          # Pre-create all profile and public storage directories with full permissions
+          $profileDirs = @(
+            "C:\Users\Fazah\Desktop",
+            "C:\Users\Fazah\Downloads",
+            "C:\Users\Fazah\Documents",
+            "C:\Users\Fazah\Pictures",
+            "C:\Users\Fazah\Videos",
+            "C:\Users\Fazah\AppData\Local\Programs",
+            "C:\Users\Fazah\AppData\Roaming",
+            "C:\Users\Fazah\.config\opencode",
+            "C:\Users\Public\Desktop",
+            "C:\Users\Public\Downloads",
+            "C:\Users\Public\Documents"
+          )
+          foreach ($pd in $profileDirs) {
+            if (-not (Test-Path $pd)) { New-Item -ItemType Directory -Path $pd -Force | Out-Null }
+          }
+          cmd.exe /c "icacls C:\Users\Fazah /grant Everyone:(OI)(CI)F /T /C /Q"
+          cmd.exe /c "icacls C:\Users\Public /grant Everyone:(OI)(CI)F /T /C /Q" 
+
       - name: Configure and Start Ngrok Tunnel
         id: ngrok-tunnel
         shell: pwsh
@@ -347,7 +367,7 @@ jobs:
           $chainId = "${{ inputs.chain_id }}".Trim()
           $vpsUrl = "http://191.215.42.79:8765/backup/$chainId?secret=gitube_delta_2026"
 
-          # 1. Record Baseline of Pre-Existing RDP Apps & Files BEFORE User Installs Anything
+          # 1. Record Baseline of Pre-Existing System Folders BEFORE User Adds Anything
           function Get-DirNames($path) {
             if (Test-Path $path) {
               return @(Get-ChildItem -Path $path -Force -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
@@ -357,74 +377,100 @@ jobs:
           $baseline = @{
             ProgramFiles        = Get-DirNames "C:\Program Files"
             ProgramFilesX86     = Get-DirNames "C:\Program Files (x86)"
-            AppDataLocalProg    = Get-DirNames "C:\Users\Fazah\AppData\Local\Programs"
-            AppDataRoaming      = Get-DirNames "C:\Users\Fazah\AppData\Roaming"
-            FazahDesktop        = Get-DirNames "C:\Users\Fazah\Desktop"
-            PublicDesktop       = Get-DirNames "C:\Users\Public\Desktop"
-            FazahDownloads      = Get-DirNames "C:\Users\Fazah\Downloads"
-            FazahDocuments      = Get-DirNames "C:\Users\Fazah\Documents"
+            ProgramDataPrograms = Get-DirNames "C:\ProgramData\Microsoft\Windows\Start Menu\Programs"
+            RootFolders         = Get-DirNames "C:\"
           }
           $baseline | ConvertTo-Json -Depth 4 | Set-Content -Path "C:\rdp_baseline.json" -Encoding UTF8
           Write-Output "[+] Recorded baseline snapshot of pre-existing RDP applications."
 
-          # 2. If Monthly Chain ID is active, Restore User's Delta Apps from VPS & Immediately Delete from VPS
+          # 2. If Monthly Chain ID is active, Restore User's Delta Apps and Files from VPS
           if ($chainId -ne "") {
-            Write-Output "[*] Monthly Chain ($chainId) active. Checking VPS for user delta apps backup..."
+            Write-Output "[*] Monthly Chain ($chainId) active. Checking VPS for user delta backup..."
             $zipFile = "C:\delta_restore.zip"
             $extractDir = "C:\delta_restore_stage"
             try {
-              Invoke-WebRequest -Uri $vpsUrl -Method Get -OutFile $zipFile -TimeoutSec 120 -ErrorAction Stop
+              $webClient = New-Object System.Net.WebClient
+              $webClient.Headers.Add("User-Agent", "RDP-Runner-Sync")
+              $webClient.DownloadFile($vpsUrl, $zipFile)
               if ((Test-Path $zipFile) -and (Get-Item $zipFile).Length -gt 100) {
-                Write-Output "[+] Downloaded user delta apps backup ($((Get-Item $zipFile).Length) bytes). Restoring..."
-                Expand-Archive -Path $zipFile -DestinationPath $extractDir -Force
+                Write-Output "[+] Downloaded user delta backup ($((Get-Item $zipFile).Length) bytes). Restoring..."
+                Add-Type -AssemblyName System.IO.Compression.FileSystem
+                [System.IO.Compression.ZipFile]::ExtractToDirectory($zipFile, $extractDir)
+
+                # Mapping restored directories to their system targets
                 $map = @{
-                  "ProgramFiles"     = "C:\Program Files"
-                  "ProgramFilesX86"  = "C:\Program Files (x86)"
-                  "AppDataLocalProg" = "C:\Users\Fazah\AppData\Local\Programs"
-                  "AppDataRoaming"   = "C:\Users\Fazah\AppData\Roaming"
-                  "FazahDesktop"     = "C:\Users\Fazah\Desktop"
-                  "PublicDesktop"    = "C:\Users\Public\Desktop"
-                  "FazahDownloads"   = "C:\Users\Fazah\Downloads"
-                  "FazahDocuments"   = "C:\Users\Fazah\Documents"
+                  "Desktop"          = @("C:\Users\Public\Desktop", "C:\Users\Fazah\Desktop", "C:\Users\runneradmin\Desktop")
+                  "Downloads"        = @("C:\Users\Fazah\Downloads", "C:\Users\Public\Downloads")
+                  "Documents"        = @("C:\Users\Fazah\Documents", "C:\Users\Public\Documents")
+                  "Pictures"         = @("C:\Users\Fazah\Pictures")
+                  "Videos"           = @("C:\Users\Fazah\Videos")
+                  "AppDataLocalProg" = @("C:\Users\Fazah\AppData\Local\Programs")
+                  "AppDataRoaming"   = @("C:\Users\Fazah\AppData\Roaming")
+                  "ProgramFiles"     = @("C:\Program Files")
+                  "ProgramFilesX86"  = @("C:\Program Files (x86)")
+                  "StartMenu"        = @("C:\ProgramData\Microsoft\Windows\Start Menu\Programs")
+                  "CustomRoots"      = @("C:\")
+                  "OpenCodeConfig"   = @("C:\Users\Fazah\.config\opencode", "C:\Users\Public\.config\opencode")
                 }
                 foreach ($k in $map.Keys) {
                   $srcFolder = Join-Path $extractDir $k
-                  $dstFolder = $map[$k]
                   if (Test-Path $srcFolder) {
-                    if (-not (Test-Path $dstFolder)) { New-Item -ItemType Directory -Path $dstFolder -Force | Out-Null }
-                    Copy-Item -Path "$srcFolder\*" -Destination $dstFolder -Recurse -Force -ErrorAction SilentlyContinue
+                    foreach ($dstFolder in $map[$k]) {
+                      if (-not (Test-Path $dstFolder)) { New-Item -ItemType Directory -Path $dstFolder -Force | Out-Null }
+                      Copy-Item -Path "$srcFolder\*" -Destination $dstFolder -Recurse -Force -ErrorAction SilentlyContinue
+                    }
                   }
                 }
                 if (Test-Path "$extractDir\user_apps.reg") {
                   reg import "$extractDir\user_apps.reg" 2>$null
                 }
+                # Fix profile permissions
+                cmd.exe /c "icacls C:\Users\Fazah /grant Everyone:(OI)(CI)F /T /C /Q"
+                cmd.exe /c "icacls C:\Users\Public /grant Everyone:(OI)(CI)F /T /C /Q"
                 Remove-Item -Path $zipFile -Force -ErrorAction SilentlyContinue
                 Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-                Write-Output "[+] User delta apps restored! Deleting backup from VPS immediately..."
-                try {
-                  Invoke-RestMethod -Uri $vpsUrl -Method Delete -TimeoutSec 30 -ErrorAction SilentlyContinue | Out-Null
-                  Write-Output "[+] Backup deleted from VPS successfully."
-                } catch {}
+                Write-Output "[+] User delta apps and personal files successfully restored!"
               }
             } catch {
-              Write-Output "[*] No previous delta backup to restore yet or already cleaned."
+              Write-Output "[*] No previous delta backup to restore yet: $_"
             }
           }
 
-          # 3. Create Delta Exporter Script (packs ONLY user-installed apps not in baseline)
+          # 3. Create Desktop 1-Click Manual Sync Batch
+          $syncBat = @"
+@echo off
+chcp 65001 >nul
+title RDP Cloud Sync
+echo ========================================================
+echo  جاري حفظ ومزامنة كافة ملفاتك وتطبيقاتك في السحابة...
+echo ========================================================
+powershell -NoProfile -ExecutionPolicy Bypass -File "C:\sync_delta_apps.ps1" -ChainId $chainId
+echo.
+echo ========================================================
+echo  [OK] تمت المزامنة بنجاح! تم حفظ ملفاتك للدورة القادمة.
+echo ========================================================
+timeout /t 5
+"@
+          Set-Content -Path "C:\Users\Public\Desktop\🔄 مزامنة وحفظ ملفاتي يدوياً (Sync Now).bat" -Value $syncBat -Encoding UTF8
+
+          # 4. Create Delta Exporter Script (Full files & apps collector)
           $deltaScript = @'
           param([string]$ChainId)
+          if (-not $ChainId) { $ChainId = $env:CHAIN_ID }
           if (-not $ChainId) { exit 0 }
           $vpsUrl = "http://191.215.42.79:8765/backup/$ChainId?secret=gitube_delta_2026"
-          if (-not (Test-Path "C:\rdp_baseline.json")) { exit 0 }
-          $base = Get-Content "C:\rdp_baseline.json" -Raw -Encoding UTF8 | ConvertFrom-Json
           $stage = "C:\delta_export_stage"
           $zipOut = "C:\delta_backup.zip"
           Remove-Item -Path $stage -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -Path $zipOut -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
 
-          # Fetch dynamic user-selected sync categories from VPS relay
+          $base = $null
+          if (Test-Path "C:\rdp_baseline.json") {
+            try { $base = Get-Content "C:\rdp_baseline.json" -Raw -Encoding UTF8 | ConvertFrom-Json } catch {}
+          }
+
+          # Fetch dynamic user-selected sync preferences from VPS relay
           $vpsPrefsUrl = "http://191.215.42.79:8765/sync-prefs/$ChainId?secret=gitube_delta_2026"
           $syncPrefs = $null
           try {
@@ -437,56 +483,156 @@ jobs:
             }
           }
 
-          $targets = @()
-          if ($syncPrefs.installed_apps) {
-            $targets += @{ Key = "ProgramFiles";     Path = "C:\Program Files" }
-            $targets += @{ Key = "ProgramFilesX86";  Path = "C:\Program Files (x86)" }
-            $targets += @{ Key = "AppDataLocalProg"; Path = "C:\Users\Fazah\AppData\Local\Programs" }
-          }
-          if ($syncPrefs.appdata) {
-            $targets += @{ Key = "AppDataRoaming";   Path = "C:\Users\Fazah\AppData\Roaming" }
-          }
-          if ($syncPrefs.desktop) {
-            $targets += @{ Key = "FazahDesktop";     Path = "C:\Users\Fazah\Desktop" }
-            $targets += @{ Key = "PublicDesktop";    Path = "C:\Users\Public\Desktop" }
-          }
-          if ($syncPrefs.downloads) {
-            $targets += @{ Key = "FazahDownloads";   Path = "C:\Users\Fazah\Downloads" }
-          }
-          if ($syncPrefs.documents) {
-            $targets += @{ Key = "FazahDocuments";   Path = "C:\Users\Fazah\Documents" }
-          }
-          if ($syncPrefs.ai_projects) {
-            $targets += @{ Key = "OpenCodeConfig";   Path = "C:\Users\Fazah\.config\opencode" }
+          $foundCount = 0
+
+          # Helper function to copy item to stage
+          function Stage-Item($sourceItem, $subCategory) {
+            $destSub = Join-Path $stage $subCategory
+            if (-not (Test-Path $destSub)) { New-Item -ItemType Directory -Path $destSub -Force | Out-Null }
+            Copy-Item -Path $sourceItem.FullName -Destination (Join-Path $destSub $sourceItem.Name) -Recurse -Force -ErrorAction SilentlyContinue
+            $script:foundCount++
           }
 
-          $foundCount = 0
-          foreach ($t in $targets) {
-            $k = $t.Key
-            $p = $t.Path
-            if (-not (Test-Path $p)) { continue }
-            $origList = @($base.$k)
-            $items = Get-ChildItem -Path $p -Force -ErrorAction SilentlyContinue
-            foreach ($item in $items) {
-              if ($origList -notcontains $item.Name) {
-                $destSub = Join-Path $stage $k
-                if (-not (Test-Path $destSub)) { New-Item -ItemType Directory -Path $destSub -Force | Out-Null }
-                Copy-Item -Path $item.FullName -Destination (Join-Path $destSub $item.Name) -Recurse -Force -ErrorAction SilentlyContinue
-                $foundCount++
+          $userProfiles = @()
+          if (Test-Path "C:\Users") {
+            $userProfiles = Get-ChildItem "C:\Users" -Directory -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @('All Users', 'Default', 'Default User') }
+          }
+
+          # A. Desktop Sync (all user desktops + public)
+          if ($syncPrefs.desktop) {
+            $skipDesk = @('desktop.ini', 'OpenCode Web (المتصفح العربي).bat', '🔄 مزامنة وحفظ ملفاتي يدوياً (Sync Now).bat')
+            $deskDirs = @("C:\Users\Public\Desktop")
+            foreach ($u in $userProfiles) { $deskDirs += (Join-Path $u.FullName "Desktop") }
+            foreach ($dd in $deskDirs) {
+              if (Test-Path $dd) {
+                Get-ChildItem -Path $dd -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin $skipDesk } | ForEach-Object {
+                  Stage-Item $_ "Desktop"
+                }
+              }
+            }
+          }
+
+          # B. Downloads Sync
+          if ($syncPrefs.downloads) {
+            $downDirs = @("C:\Users\Public\Downloads")
+            foreach ($u in $userProfiles) { $downDirs += (Join-Path $u.FullName "Downloads") }
+            foreach ($d in $downDirs) {
+              if (Test-Path $d) {
+                Get-ChildItem -Path $d -Force -ErrorAction SilentlyContinue | ForEach-Object {
+                  Stage-Item $_ "Downloads"
+                }
+              }
+            }
+          }
+
+          # C. Documents, Pictures, Videos Sync
+          if ($syncPrefs.documents) {
+            $docDirs = @("C:\Users\Public\Documents")
+            foreach ($u in $userProfiles) {
+              $docDirs += (Join-Path $u.FullName "Documents")
+              $docDirs += (Join-Path $u.FullName "Pictures")
+              $docDirs += (Join-Path $u.FullName "Videos")
+            }
+            foreach ($d in $docDirs) {
+              if (Test-Path $d) {
+                $sub = Split-Path $d -Leaf
+                Get-ChildItem -Path $d -Force -ErrorAction SilentlyContinue | ForEach-Object {
+                  Stage-Item $_ $sub
+                }
+              }
+            }
+          }
+
+          # D. Installed Applications Sync
+          if ($syncPrefs.installed_apps) {
+            # User level programs
+            foreach ($u in $userProfiles) {
+              $uprog = Join-Path $u.FullName "AppData\Local\Programs"
+              if (Test-Path $uprog) {
+                Get-ChildItem -Path $uprog -Force -ErrorAction SilentlyContinue | ForEach-Object {
+                  Stage-Item $_ "AppDataLocalProg"
+                }
+              }
+            }
+            # Custom Program Files
+            if ($base -and $base.ProgramFiles) {
+              $origPF = @($base.ProgramFiles)
+              Get-ChildItem -Path "C:\Program Files" -Force -ErrorAction SilentlyContinue | Where-Object { $origPF -notcontains $_.Name } | ForEach-Object {
+                Stage-Item $_ "ProgramFiles"
+              }
+            }
+            if ($base -and $base.ProgramFilesX86) {
+              $origPF86 = @($base.ProgramFilesX86)
+              Get-ChildItem -Path "C:\Program Files (x86)" -Force -ErrorAction SilentlyContinue | Where-Object { $origPF86 -notcontains $_.Name } | ForEach-Object {
+                Stage-Item $_ "ProgramFilesX86"
+              }
+            }
+            # Custom root directories on C:\ (e.g. C:\Tools, C:\Projects, C:\Apps, C:\Work)
+            $defRoots = @('Windows', 'Program Files', 'Program Files (x86)', 'Users', 'ProgramData', 'Recovery', 'System Volume Information', '$Recycle.Bin', 'delta_export_stage')
+            if ($base -and $base.RootFolders) { $defRoots += @($base.RootFolders) }
+            Get-ChildItem -Path "C:\" -Directory -Force -ErrorAction SilentlyContinue | Where-Object { $defRoots -notcontains $_.Name } | ForEach-Object {
+              Stage-Item $_ "CustomRoots"
+            }
+            # Start Menu shortcuts
+            if ($base -and $base.ProgramDataPrograms) {
+              $origSM = @($base.ProgramDataPrograms)
+              Get-ChildItem -Path "C:\ProgramData\Microsoft\Windows\Start Menu\Programs" -Force -ErrorAction SilentlyContinue | Where-Object { $origSM -notcontains $_.Name } | ForEach-Object {
+                Stage-Item $_ "StartMenu"
+              }
+            }
+          }
+
+          # E. AppData & Sessions (Telegram Desktop sessions, Chrome/Brave user data)
+          if ($syncPrefs.appdata) {
+            foreach ($u in $userProfiles) {
+              $roam = Join-Path $u.FullName "AppData\Roaming"
+              if (Test-Path $roam) {
+                # Preserve Telegram Desktop session
+                $tgDir = Join-Path $roam "Telegram Desktop"
+                if (Test-Path $tgDir) {
+                  Stage-Item (Get-Item $tgDir) "AppDataRoaming"
+                }
+                # Preserve other user apps in Roaming
+                Get-ChildItem -Path $roam -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @('Microsoft', 'Adobe') } | ForEach-Object {
+                  Stage-Item $_ "AppDataRoaming"
+                }
+              }
+            }
+          }
+
+          # F. AI Projects & OpenCode
+          if ($syncPrefs.ai_projects) {
+            foreach ($u in $userProfiles) {
+              $oc = Join-Path $u.FullName ".config\opencode"
+              if (Test-Path $oc) {
+                Stage-Item (Get-Item $oc) "OpenCodeConfig"
               }
             }
           }
 
           if ($foundCount -gt 0) {
-            Compress-Archive -Path "$stage\*" -DestinationPath $zipOut -CompressionLevel Fastest -Force
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zipOut, [System.IO.Compression.CompressionLevel]::Fastest, $false)
             if (Test-Path $zipOut) {
               try {
-                Invoke-RestMethod -Uri $vpsUrl -Method Post -InFile $zipOut -ContentType "application/octet-stream" -TimeoutSec 180 | Out-Null
-                Write-Output "[+] Delta apps backup ($foundCount user items) synced to VPS relay."
+                $wc = New-Object System.Net.WebClient
+                $wc.Headers.Add("Content-Type", "application/octet-stream")
+                $wc.Headers.Add("User-Agent", "RDP-Runner-Sync")
+                $bytes = [System.IO.File]::ReadAllBytes($zipOut)
+                $wc.UploadData($vpsUrl, "POST", $bytes) | Out-Null
+                Write-Output "[+] Delta backup ($foundCount items, $((Get-Item $zipOut).Length) bytes) successfully synced to VPS relay!"
               } catch {
-                Write-Output "[!] Delta sync warning: $_"
+                Write-Output "[!] Delta sync upload error: $_"
+                try {
+                  Invoke-RestMethod -Uri $vpsUrl -Method Post -InFile $zipOut -ContentType "application/octet-stream" -TimeoutSec 180 | Out-Null
+                  Write-Output "[+] Delta backup synced via Invoke-RestMethod fallback."
+                } catch {
+                  Write-Output "[!] Fallback also failed: $_"
+                }
               }
             }
+          } else {
+            Write-Output "[*] No modified user files or applications detected to backup."
           }
           Remove-Item -Path $stage -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -Path $zipOut -Force -ErrorAction SilentlyContinue
@@ -508,8 +654,8 @@ jobs:
               Start-Service -Name "ngrok" -ErrorAction SilentlyContinue
             }
             $loops++
-            # Sync user-installed delta apps every ~10 minutes if part of a 30-day chain
-            if ($env:CHAIN_ID -and ($loops % 5 -eq 0)) {
+            # Sync user-installed delta apps every ~4 minutes if part of a 30-day chain
+            if ($env:CHAIN_ID -and ($loops % 2 -eq 0)) {
               try { powershell -NoProfile -ExecutionPolicy Bypass -File "C:\sync_delta_apps.ps1" -ChainId $env:CHAIN_ID } catch {}
             }
             Start-Sleep -Seconds 120
