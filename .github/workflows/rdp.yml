@@ -716,19 +716,21 @@ jobs:
           done
           sleep 4
           
-          # Configure XRDP with resilient VNC backend
+          # Configure XRDP with standard RDP security to prevent Windows 0x1104 protocol disconnect
           sudo systemctl stop xrdp 2>/dev/null || true
           cat << 'EOF' | sudo tee /etc/xrdp/xrdp.ini > /dev/null
           [globals]
           ini_version=1
-          bitmap_cache=true
-          bitmap_compression=true
+          bitmap_cache=false
+          bitmap_compression=false
           port=3389
-          crypt_level=low
+          crypt_level=none
           channel_code=1
           max_bpp=24
+          security_layer=rdp
+          ssl_protocols=
           autorun=HorusOS-Desktop
-          
+
           [HorusOS-Desktop]
           name=HorusOS-Desktop
           lib=libvnc.so
