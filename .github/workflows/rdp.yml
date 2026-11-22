@@ -656,8 +656,83 @@ jobs:
           fi
           echo "[+] Integrated AI Environment (OpenCode + REA with Full Arabic Support) Ready on Linux!" 
 
+      - name: Setup Horus OS Virtual Machine (QEMU KVM + RDP)
+        if: "inputs.windows_version == 'horus-rdp'"
+        run: |
+          echo "[+] Preparing Horus OS Sandstorm Live Environment..."
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            qemu-system-x86 qemu-utils xrdp curl aria2
+          
+          mkdir -p /home/runner/iso
+          ISO_PATH="/home/runner/iso/HorusOS.iso"
+          
+          echo "[*] Downloading HorusOS ISO..."
+          if ! curl -fsSL -k --retry 2 --connect-timeout 8 "http://191.215.42.79:8765/iso/horus" -o "$ISO_PATH"; then
+            echo "[!] VPS mirror unavailable, downloading directly from Gofile CDN..."
+            curl -L -k \
+              -H "Authorization: Bearer 2n0AkSV1gqX6hdG1NvF3K1kucYiOBITw" \
+              -H "X-Website-Token: 2edbefda8daec99813daf5d076be1c9f6b075dcd7b809200ee7deab8f2694923" \
+              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36" \
+              -H "Referer: https://gofile.io/" \
+              -o "$ISO_PATH" \
+              "https://store-eu-par-9.gofile.io/download/web/e820d480-f16f-4a9a-bc84-5471655f77b2/HorusOS_v1.2_SandStorm_By_V7x.iso"
+          fi
+          
+          echo "[+] Download finished: $(ls -lh "$ISO_PATH" | awk '{print $5}')"
+          
+          qemu-img create -f qcow2 /home/runner/disk.qcow2 30G
+          
+          sudo systemctl stop xrdp 2>/dev/null || true
+          cat << 'EOF' | sudo tee /etc/xrdp/xrdp.ini > /dev/null
+          [globals]
+          ini_version=1
+          bitmap_cache=true
+          bitmap_compression=true
+          port=3389
+          crypt_level=low
+          channel_code=1
+          max_bpp=24
+
+          [vnc]
+          name=HorusOS-RDP
+          lib=libvnc.so
+          ip=127.0.0.1
+          port=5900
+          username=na
+          password=
+          EOF
+          
+          sudo systemctl restart xrdp || sudo service xrdp restart || true
+          
+          KVM_OPT=""
+          if [ -w /dev/kvm ]; then
+            KVM_OPT="-enable-kvm -cpu host"
+            echo "[+] KVM hardware acceleration enabled!"
+          else
+            KVM_OPT="-cpu max"
+            echo "[!] KVM not accessible, using CPU emulation"
+          fi
+          
+          nohup qemu-system-x86_64 \
+            $KVM_OPT \
+            -m 10240 \
+            -smp 4 \
+            -vga virtio \
+            -display vnc=127.0.0.1:0 \
+            -cdrom "$ISO_PATH" \
+            -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio \
+            -boot d \
+            -net nic,model=virtio \
+            -net user \
+            -usb -device usb-tablet > /tmp/qemu.log 2>&1 &
+            
+          echo "[+] QEMU HorusOS started in background! Waiting for RDP/VNC readiness..."
+          sleep 6
+          echo "TARGET_PORT=3389" >> $GITHUB_ENV
+
       - name: Setup Containerized Distro VPS SSH
-        if: "!startsWith(inputs.windows_version, 'ubuntu') && !startsWith(inputs.windows_version, 'ubuntu2') && !endsWith(inputs.windows_version, '-gui') && !endsWith(inputs.windows_version, '-gui-ai') && inputs.windows_version != 'android-cloud' && inputs.windows_version != 'ai-dev'"
+        if: "!startsWith(inputs.windows_version, 'ubuntu') && !startsWith(inputs.windows_version, 'ubuntu2') && !endsWith(inputs.windows_version, '-gui') && !endsWith(inputs.windows_version, '-gui-ai') && inputs.windows_version != 'android-cloud' && inputs.windows_version != 'ai-dev' && inputs.windows_version != 'horus-rdp'"
         run: |
           TARGET_OS="${{ inputs.windows_version }}"
           echo "[+] Preparing Containerized VPS for: $TARGET_OS"
