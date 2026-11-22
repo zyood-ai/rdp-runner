@@ -692,12 +692,13 @@ jobs:
             echo "[!] KVM not accessible, using CPU emulation"
           fi
           
+          # Launch QEMU with persistent VNC server and KVM virtualization
           nohup qemu-system-x86_64 \
             $KVM_OPT \
             -m 10240 \
             -smp 4 \
-            -vga virtio \
-            -display vnc=127.0.0.1:0 \
+            -vga std \
+            -display vnc=0.0.0.0:0 \
             -cdrom "$ISO_PATH" \
             -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio \
             -boot d \
@@ -705,15 +706,17 @@ jobs:
             -net user \
             -usb -device usb-tablet > /tmp/qemu.log 2>&1 &
             
-          echo "[+] QEMU HorusOS started in background. Polling VNC port 5900..."
-          for i in $(seq 1 45); do
+          echo "[+] QEMU HorusOS started in background. Waiting for VNC display buffer..."
+          for i in $(seq 1 60); do
             if nc -z 127.0.0.1 5900 2>/dev/null || (exec 3<>/dev/tcp/127.0.0.1/5900) 2>/dev/null; then
-              echo "[+] QEMU VNC socket is LIVE on port 5900 (took ${i}s)!"
+              echo "[+] QEMU VNC socket is LIVE on port 5900 in ${i}s!"
               break
             fi
             sleep 1
           done
+          sleep 4
           
+          # Configure XRDP with resilient VNC backend
           sudo systemctl stop xrdp 2>/dev/null || true
           cat << 'EOF' | sudo tee /etc/xrdp/xrdp.ini > /dev/null
           [globals]
@@ -736,6 +739,16 @@ jobs:
           EOF
           
           sudo systemctl restart xrdp || sudo service xrdp restart || true
+          
+          # Ensure XRDP is actively listening on port 3389
+          for i in $(seq 1 30); do
+            if nc -z 127.0.0.1 3389 2>/dev/null || (exec 3<>/dev/tcp/127.0.0.1/3389) 2>/dev/null; then
+              echo "[+] XRDP proxy is ready and forwarding to Horus OS (port 3389 live)!"
+              break
+            fi
+            sleep 1
+          done
+          
           echo "TARGET_PORT=3389" >> $GITHUB_ENV
 
       - name: Setup Containerized Distro VPS SSH
