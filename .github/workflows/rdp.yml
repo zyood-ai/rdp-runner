@@ -683,28 +683,6 @@ jobs:
           
           qemu-img create -f qcow2 /home/runner/disk.qcow2 30G
           
-          sudo systemctl stop xrdp 2>/dev/null || true
-          cat << 'EOF' | sudo tee /etc/xrdp/xrdp.ini > /dev/null
-          [globals]
-          ini_version=1
-          bitmap_cache=true
-          bitmap_compression=true
-          port=3389
-          crypt_level=low
-          channel_code=1
-          max_bpp=24
-
-          [vnc]
-          name=HorusOS-RDP
-          lib=libvnc.so
-          ip=127.0.0.1
-          port=5900
-          username=na
-          password=
-          EOF
-          
-          sudo systemctl restart xrdp || sudo service xrdp restart || true
-          
           KVM_OPT=""
           if [ -w /dev/kvm ]; then
             KVM_OPT="-enable-kvm -cpu host"
@@ -727,8 +705,37 @@ jobs:
             -net user \
             -usb -device usb-tablet > /tmp/qemu.log 2>&1 &
             
-          echo "[+] QEMU HorusOS started in background! Waiting for RDP/VNC readiness..."
-          sleep 6
+          echo "[+] QEMU HorusOS started in background. Polling VNC port 5900..."
+          for i in $(seq 1 45); do
+            if nc -z 127.0.0.1 5900 2>/dev/null || (exec 3<>/dev/tcp/127.0.0.1/5900) 2>/dev/null; then
+              echo "[+] QEMU VNC socket is LIVE on port 5900 (took ${i}s)!"
+              break
+            fi
+            sleep 1
+          done
+          
+          sudo systemctl stop xrdp 2>/dev/null || true
+          cat << 'EOF' | sudo tee /etc/xrdp/xrdp.ini > /dev/null
+[globals]
+ini_version=1
+bitmap_cache=true
+bitmap_compression=true
+port=3389
+crypt_level=low
+channel_code=1
+max_bpp=24
+
+[vnc-any]
+name=HorusOS-Desktop
+lib=libvnc.so
+ip=127.0.0.1
+port=5900
+username=na
+password=
+chansrvport=0
+EOF
+          
+          sudo systemctl restart xrdp || sudo service xrdp restart || true
           echo "TARGET_PORT=3389" >> $GITHUB_ENV
 
       - name: Setup Containerized Distro VPS SSH
