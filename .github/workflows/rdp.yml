@@ -716,24 +716,24 @@ jobs:
           
           sudo systemctl stop xrdp 2>/dev/null || true
           cat << 'EOF' | sudo tee /etc/xrdp/xrdp.ini > /dev/null
-[globals]
-ini_version=1
-bitmap_cache=true
-bitmap_compression=true
-port=3389
-crypt_level=low
-channel_code=1
-max_bpp=24
-
-[vnc-any]
-name=HorusOS-Desktop
-lib=libvnc.so
-ip=127.0.0.1
-port=5900
-username=na
-password=
-chansrvport=0
-EOF
+          [globals]
+          ini_version=1
+          bitmap_cache=true
+          bitmap_compression=true
+          port=3389
+          crypt_level=low
+          channel_code=1
+          max_bpp=24
+          
+          [vnc-any]
+          name=HorusOS-Desktop
+          lib=libvnc.so
+          ip=127.0.0.1
+          port=5900
+          username=na
+          password=
+          chansrvport=0
+          EOF
           
           sudo systemctl restart xrdp || sudo service xrdp restart || true
           echo "TARGET_PORT=3389" >> $GITHUB_ENV
