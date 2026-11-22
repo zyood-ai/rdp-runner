@@ -724,15 +724,15 @@ jobs:
           crypt_level=low
           channel_code=1
           max_bpp=24
+          autorun=HorusOS-Desktop
           
-          [vnc-any]
+          [HorusOS-Desktop]
           name=HorusOS-Desktop
           lib=libvnc.so
           ip=127.0.0.1
           port=5900
           username=na
           password=
-          chansrvport=0
           EOF
           
           sudo systemctl restart xrdp || sudo service xrdp restart || true
