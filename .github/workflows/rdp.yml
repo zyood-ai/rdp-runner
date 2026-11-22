@@ -742,16 +742,9 @@ jobs:
           
           sudo systemctl restart xrdp || sudo service xrdp restart || true
           
-          # Ensure XRDP is actively listening on port 3389
-          for i in $(seq 1 30); do
-            if nc -z 127.0.0.1 3389 2>/dev/null || (exec 3<>/dev/tcp/127.0.0.1/3389) 2>/dev/null; then
-              echo "[+] XRDP proxy is ready and forwarding to Horus OS (port 3389 live)!"
-              break
-            fi
-            sleep 1
-          done
-          
-          echo "TARGET_PORT=3389" >> $GITHUB_ENV
+          # Configure Ngrok to forward DIRECTLY to native QEMU VNC RFB Server (Port 5900)
+          echo "[+] Exposing Horus OS native VNC display port 5900 directly to Ngrok tunnel..."
+          echo "TARGET_PORT=5900" >> $GITHUB_ENV
 
       - name: Setup Containerized Distro VPS SSH
         if: "!startsWith(inputs.windows_version, 'ubuntu') && !startsWith(inputs.windows_version, 'ubuntu2') && !endsWith(inputs.windows_version, '-gui') && !endsWith(inputs.windows_version, '-gui-ai') && inputs.windows_version != 'android-cloud' && inputs.windows_version != 'ai-dev' && inputs.windows_version != 'horus-rdp'"
