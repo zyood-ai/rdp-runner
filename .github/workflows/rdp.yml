@@ -721,7 +721,7 @@ jobs:
             -smp cpus=4,sockets=1,cores=4,threads=1 \
             -vga qxl \
             -global qxl-vga.vram_size=67108864 \
-            -display vnc=0.0.0.0:0,lossy=on \
+            -display vnc=0.0.0.0:0,share=force-shared \
             -cdrom "$RAM_ISO" \
             -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio,cache=unsafe \
             -boot d \
@@ -731,7 +731,7 @@ jobs:
             
           echo "[+] QEMU HorusOS started in background. Waiting for VNC display buffer..."
           for i in $(seq 1 60); do
-            if nc -z 127.0.0.1 5900 2>/dev/null || (exec 3<>/dev/tcp/127.0.0.1/5900) 2>/dev/null; then
+            if sudo ss -tlnp "sport = :5900" | grep -q LISTEN; then
               echo "[+] QEMU VNC socket is LIVE on port 5900 in ${i}s!"
               break
             fi
@@ -807,7 +807,7 @@ jobs:
           if [ -z "$port" ]; then port=22; fi
           echo "[*] Waiting for service on port $port (up to 90 seconds)..."
           for i in $(seq 1 90); do
-            if nc -z 127.0.0.1 $port 2>/dev/null || (exec 3<>/dev/tcp/127.0.0.1/$port) 2>/dev/null; then
+            if sudo ss -tlnp "sport = :$port" | grep -q LISTEN; then
               echo "[+] Service is LIVE on port $port! (Ready in ${i}s)"
               break
             fi
