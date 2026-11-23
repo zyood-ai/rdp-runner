@@ -695,19 +695,19 @@ jobs:
             echo "[!] KVM not accessible, using CPU emulation"
           fi
           
-          # Launch QEMU with VirtIO GPU and multithreaded vCPU for maximum desktop smoothness
+          # Launch QEMU with maximum low-latency flags and optimized mouse tracking
           nohup qemu-system-x86_64 \
             $KVM_OPT \
             -m 10240 \
-            -smp 4,sockets=1,cores=4,threads=1 \
-            -device virtio-vga,xres=1920,yres=1080 \
-            -display vnc=0.0.0.0:0,lossy=off \
+            -smp cpus=4,cores=4,threads=1 \
+            -vga std \
+            -display vnc=0.0.0.0:0,lossy=on,non-adaptive=off \
             -cdrom "$ISO_PATH" \
-            -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio,cache=unsafe \
+            -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio,cache=none,aio=native \
             -boot d \
             -net nic,model=virtio \
             -net user \
-            -usb -device usb-tablet > /tmp/qemu.log 2>&1 &
+            -usb -device usb-mouse -device usb-kbd > /tmp/qemu.log 2>&1 &
             
           echo "[+] QEMU HorusOS started in background. Waiting for VNC display buffer..."
           for i in $(seq 1 60); do
