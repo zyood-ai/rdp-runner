@@ -687,21 +687,22 @@ jobs:
           sudo chmod 666 /dev/kvm 2>/dev/null || true
           
           KVM_OPT=""
-          if [ -e /dev/kvm ]; then
-            KVM_OPT="-enable-kvm -cpu host,migratable=off,+invtsc"
-            echo "[+] KVM hardware acceleration enabled with host CPU instructions!"
+          if [ -e /dev/kvm ] && [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+            KVM_OPT="-enable-kvm -cpu host"
+            echo "[+] KVM hardware acceleration enabled with host CPU!"
           else
             KVM_OPT="-cpu max"
             echo "[!] KVM not accessible, using CPU emulation"
           fi
           
-          # Ramdisk cache + Ultra-low-latency QEMU engine
+          # Ramdisk cache + Ultra-low-latency QEMU engine (using /tmp to prevent AppArmor blocks)
           echo "[+] Loading ISO directly to tmpfs RAM disk for lightning-fast disk access..."
-          sudo mkdir -p /mnt/ramdisk
-          sudo mount -t tmpfs -o size=3500M tmpfs /mnt/ramdisk
-          sudo cp "$ISO_PATH" /mnt/ramdisk/HorusOS.iso
-          sudo chown -R runner:runner /mnt/ramdisk 2>/dev/null || true
-          RAM_ISO="/mnt/ramdisk/HorusOS.iso"
+          RAM_DIR="/home/runner/ramdisk"
+          mkdir -p "$RAM_DIR"
+          sudo mount -t tmpfs -o size=3500M tmpfs "$RAM_DIR"
+          sudo chown -R runner:runner "$RAM_DIR"
+          cp "$ISO_PATH" "$RAM_DIR/HorusOS.iso"
+          RAM_ISO="$RAM_DIR/HorusOS.iso"
           
           # Maximize host & guest network stack throughput (Gigabit low-latency tuning)
           sudo sysctl -w vm.swappiness=10
@@ -716,12 +717,11 @@ jobs:
           # Launch QEMU with multi-queue VirtIO gigabit NIC with TSO/GSO offloading & Cloudflare DNS
           nohup sudo nice -n -20 ionice -c 1 -n 0 qemu-system-x86_64 \
             $KVM_OPT \
-            -machine q35,accel=kvm,kernel-irqchip=on \
-            -m 8192 \
-            -smp cpus=4,sockets=1,cores=4,threads=1 \
+            -m 6144 \
+            -smp cpus=2,cores=2,threads=1 \
             -vga qxl \
             -global qxl-vga.vram_size=67108864 \
-            -display vnc=0.0.0.0:0,share=force-shared \
+            -vnc 0.0.0.0:0,share=force-shared \
             -cdrom "$RAM_ISO" \
             -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio,cache=unsafe \
             -boot d \
@@ -738,6 +738,12 @@ jobs:
             sleep 1
           done
           sleep 4
+          
+          if ! sudo ss -tlnp "sport = :5900" | grep -q LISTEN; then
+            echo "[!] QEMU failed to start. Logs:"
+            cat /tmp/qemu.log
+            exit 1
+          fi
           
           # Configure XRDP with standard RDP security to prevent Windows 0x1104 protocol disconnect
           sudo systemctl stop xrdp 2>/dev/null || true
