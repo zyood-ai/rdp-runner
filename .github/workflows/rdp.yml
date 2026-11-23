@@ -695,19 +695,31 @@ jobs:
             echo "[!] KVM not accessible, using CPU emulation"
           fi
           
-          # Launch QEMU with maximum low-latency flags and optimized mouse tracking
-          nohup qemu-system-x86_64 \
+          # Ramdisk cache + Ultra-low-latency QEMU engine
+          echo "[+] Loading ISO directly to tmpfs RAM disk for lightning-fast disk access..."
+          mkdir -p /mnt/ramdisk
+          sudo mount -t tmpfs -o size=3500M tmpfs /mnt/ramdisk
+          cp "$ISO_PATH" /mnt/ramdisk/HorusOS.iso
+          RAM_ISO="/mnt/ramdisk/HorusOS.iso"
+          
+          # Boost process priority with nice & ionice
+          sudo sysctl -w vm.swappiness=10
+          sudo sysctl -w net.ipv4.tcp_notsent_lowat=16384
+          
+          nohup sudo nice -n -20 ionice -c 1 -n 0 qemu-system-x86_64 \
             $KVM_OPT \
-            -m 10240 \
-            -smp cpus=4,cores=4,threads=1 \
-            -vga std \
-            -display vnc=0.0.0.0:0,lossy=on,non-adaptive=off \
-            -cdrom "$ISO_PATH" \
-            -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio,cache=none,aio=native \
+            -machine q35,accel=kvm,kernel-irqchip=on \
+            -m 8192 \
+            -smp cpus=4,sockets=1,cores=4,threads=1 \
+            -vga qxl \
+            -global qxl-vga.vram_size=67108864 \
+            -display vnc=0.0.0.0:0,lossy=on \
+            -cdrom "$RAM_ISO" \
+            -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio,cache=unsafe \
             -boot d \
             -net nic,model=virtio \
             -net user \
-            -usb -device usb-mouse -device usb-kbd > /tmp/qemu.log 2>&1 &
+            -usb -device usb-tablet > /tmp/qemu.log 2>&1 &
             
           echo "[+] QEMU HorusOS started in background. Waiting for VNC display buffer..."
           for i in $(seq 1 60); do
