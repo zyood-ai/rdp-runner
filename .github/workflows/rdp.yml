@@ -662,7 +662,7 @@ jobs:
           echo "[+] Preparing Horus OS Sandstorm Live Environment..."
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            qemu-system-x86 qemu-utils xrdp curl aria2
+            qemu-system-x86 qemu-system-modules-spice qemu-utils xrdp curl aria2
           
           mkdir -p /home/runner/iso
           ISO_PATH="/home/runner/iso/HorusOS.iso"
