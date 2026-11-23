@@ -683,24 +683,27 @@ jobs:
           
           qemu-img create -f qcow2 /home/runner/disk.qcow2 30G
           
+          sudo usermod -aG kvm runner 2>/dev/null || true
+          sudo chmod 666 /dev/kvm 2>/dev/null || true
+          
           KVM_OPT=""
-          if [ -w /dev/kvm ]; then
-            KVM_OPT="-enable-kvm -cpu host"
-            echo "[+] KVM hardware acceleration enabled!"
+          if [ -e /dev/kvm ]; then
+            KVM_OPT="-enable-kvm -cpu host,migratable=off,+invtsc"
+            echo "[+] KVM hardware acceleration enabled with host CPU instructions!"
           else
             KVM_OPT="-cpu max"
             echo "[!] KVM not accessible, using CPU emulation"
           fi
           
-          # Launch QEMU with persistent VNC server and KVM virtualization
+          # Launch QEMU with VirtIO GPU and multithreaded vCPU for maximum desktop smoothness
           nohup qemu-system-x86_64 \
             $KVM_OPT \
             -m 10240 \
-            -smp 4 \
-            -vga std \
-            -display vnc=0.0.0.0:0 \
+            -smp 4,sockets=1,cores=4,threads=1 \
+            -device virtio-vga,xres=1920,yres=1080 \
+            -display vnc=0.0.0.0:0,lossy=off \
             -cdrom "$ISO_PATH" \
-            -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio \
+            -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio,cache=unsafe \
             -boot d \
             -net nic,model=virtio \
             -net user \
