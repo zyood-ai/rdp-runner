@@ -697,9 +697,10 @@ jobs:
           
           # Ramdisk cache + Ultra-low-latency QEMU engine
           echo "[+] Loading ISO directly to tmpfs RAM disk for lightning-fast disk access..."
-          mkdir -p /mnt/ramdisk
+          sudo mkdir -p /mnt/ramdisk
           sudo mount -t tmpfs -o size=3500M tmpfs /mnt/ramdisk
-          cp "$ISO_PATH" /mnt/ramdisk/HorusOS.iso
+          sudo cp "$ISO_PATH" /mnt/ramdisk/HorusOS.iso
+          sudo chown -R runner:runner /mnt/ramdisk 2>/dev/null || true
           RAM_ISO="/mnt/ramdisk/HorusOS.iso"
           
           # Maximize host & guest network stack throughput (Gigabit low-latency tuning)
