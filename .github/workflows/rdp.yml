@@ -702,10 +702,17 @@ jobs:
           cp "$ISO_PATH" /mnt/ramdisk/HorusOS.iso
           RAM_ISO="/mnt/ramdisk/HorusOS.iso"
           
-          # Boost process priority with nice & ionice
+          # Maximize host & guest network stack throughput (Gigabit low-latency tuning)
           sudo sysctl -w vm.swappiness=10
+          sudo sysctl -w net.core.rmem_max=67108864
+          sudo sysctl -w net.core.wmem_max=67108864
+          sudo sysctl -w net.ipv4.tcp_rmem="4096 87380 67108864"
+          sudo sysctl -w net.ipv4.tcp_wmem="4096 65536 67108864"
+          sudo sysctl -w net.ipv4.tcp_congestion_control=bbr 2>/dev/null || sudo sysctl -w net.ipv4.tcp_congestion_control=cubic
+          sudo sysctl -w net.ipv4.tcp_fastopen=3
           sudo sysctl -w net.ipv4.tcp_notsent_lowat=16384
           
+          # Launch QEMU with multi-queue VirtIO gigabit NIC with TSO/GSO offloading & Cloudflare DNS
           nohup sudo nice -n -20 ionice -c 1 -n 0 qemu-system-x86_64 \
             $KVM_OPT \
             -machine q35,accel=kvm,kernel-irqchip=on \
@@ -717,8 +724,8 @@ jobs:
             -cdrom "$RAM_ISO" \
             -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio,cache=unsafe \
             -boot d \
-            -net nic,model=virtio \
-            -net user \
+            -netdev user,id=net0,dns=1.1.1.1 \
+            -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 \
             -usb -device usb-tablet > /tmp/qemu.log 2>&1 &
             
           echo "[+] QEMU HorusOS started in background. Waiting for VNC display buffer..."
