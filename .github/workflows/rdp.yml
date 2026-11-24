@@ -704,7 +704,7 @@ jobs:
           cp "$ISO_PATH" "$RAM_DIR/HorusOS.iso"
           RAM_ISO="$RAM_DIR/HorusOS.iso"
           
-          # Maximize host & guest network stack throughput (Gigabit low-latency tuning)
+          # Maximize host & guest network stack throughput & prevent idle drops
           sudo sysctl -w vm.swappiness=10
           sudo sysctl -w net.core.rmem_max=67108864
           sudo sysctl -w net.core.wmem_max=67108864
@@ -713,14 +713,19 @@ jobs:
           sudo sysctl -w net.ipv4.tcp_congestion_control=bbr 2>/dev/null || sudo sysctl -w net.ipv4.tcp_congestion_control=cubic
           sudo sysctl -w net.ipv4.tcp_fastopen=3
           sudo sysctl -w net.ipv4.tcp_notsent_lowat=16384
+          sudo sysctl -w net.ipv4.tcp_keepalive_time=30
+          sudo sysctl -w net.ipv4.tcp_keepalive_intvl=10
+          sudo sysctl -w net.ipv4.tcp_keepalive_probes=6
           
-          # Launch QEMU with multi-queue VirtIO gigabit NIC with TSO/GSO offloading & Cloudflare DNS
+          # Launch QEMU with multi-queue VirtIO gigabit NIC, 1920x1080 Full HD & Cloudflare DNS
           nohup sudo nice -n -20 ionice -c 1 -n 0 qemu-system-x86_64 \
             $KVM_OPT \
             -m 6144 \
             -smp cpus=2,cores=2,threads=1 \
             -vga qxl \
             -global qxl-vga.vram_size=67108864 \
+            -global qxl-vga.xres=1920 \
+            -global qxl-vga.yres=1080 \
             -vnc 0.0.0.0:0,share=force-shared \
             -cdrom "$RAM_ISO" \
             -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio,cache=unsafe \
