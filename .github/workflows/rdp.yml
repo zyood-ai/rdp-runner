@@ -724,7 +724,8 @@ jobs:
             -m 6144 \
             -smp cpus=2,cores=2,threads=1 \
             -vga qxl \
-            -vnc 0.0.0.0:0,share=force-shared \
+            -object secret,id=vncsec0,data=Fazah@123 \
+            -vnc 0.0.0.0:0,password-secret=vncsec0,share=force-shared \
             -cdrom "$RAM_ISO" \
             -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio,cache=unsafe \
             -boot d \
@@ -769,7 +770,7 @@ jobs:
           ip=127.0.0.1
           port=5900
           username=na
-          password=
+          password=Fazah@123
           EOF
           
           sudo systemctl restart xrdp || sudo service xrdp restart || true
