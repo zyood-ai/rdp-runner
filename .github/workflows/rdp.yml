@@ -718,16 +718,15 @@ jobs:
           sudo sysctl -w net.ipv4.tcp_keepalive_intvl=10
           sudo sysctl -w net.ipv4.tcp_keepalive_probes=6
           
-          # Launch QEMU with multi-queue VirtIO gigabit NIC, native QXL GPU & Cloudflare DNS
+          # Launch QEMU with 4 vCPUs, 8GB RAM, virtio disk, native QXL GPU & zero-password local VNC
           nohup sudo nice -n -20 ionice -c 1 -n 0 qemu-system-x86_64 \
             $KVM_OPT \
-            -m 6144 \
-            -smp cpus=2,cores=2,threads=1 \
+            -m 8192 \
+            -smp cpus=4,cores=4,threads=1 \
             -vga qxl \
-            -object secret,id=vncsec0,data=Fazah@123 \
-            -vnc 0.0.0.0:0,password-secret=vncsec0,share=force-shared \
+            -vnc 127.0.0.1:0,share=force-shared \
             -cdrom "$RAM_ISO" \
-            -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio,cache=unsafe \
+            -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio,cache=unsafe,aio=threads \
             -boot d \
             -netdev user,id=net0,dns=1.1.1.1 \
             -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 \
@@ -749,9 +748,9 @@ jobs:
             exit 1
           fi
           
-          # Configure XRDP with standard RDP security to prevent Windows 0x1104 protocol disconnect
+          # Configure XRDP without leading spaces to bridge RDP Port 3389 straight to QEMU VNC 5900
           sudo systemctl stop xrdp 2>/dev/null || true
-          cat << 'EOF' | sudo tee /etc/xrdp/xrdp.ini > /dev/null
+          cat << 'EOF' | sed 's/^[ \t]*//' | sudo tee /etc/xrdp/xrdp.ini > /dev/null
           [globals]
           ini_version=1
           bitmap_cache=true
@@ -770,7 +769,7 @@ jobs:
           ip=127.0.0.1
           port=5900
           username=na
-          password=Fazah@123
+          password=
           EOF
           
           sudo systemctl restart xrdp || sudo service xrdp restart || true
