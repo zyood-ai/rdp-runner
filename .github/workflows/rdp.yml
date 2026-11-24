@@ -752,8 +752,8 @@ jobs:
           cat << 'EOF' | sudo tee /etc/xrdp/xrdp.ini > /dev/null
           [globals]
           ini_version=1
-          bitmap_cache=false
-          bitmap_compression=false
+          bitmap_cache=true
+          bitmap_compression=true
           port=3389
           crypt_level=none
           channel_code=1
@@ -773,9 +773,9 @@ jobs:
           
           sudo systemctl restart xrdp || sudo service xrdp restart || true
           
-          # Configure Ngrok to forward DIRECTLY to native QEMU VNC RFB Server (Port 5900)
-          echo "[+] Exposing Horus OS native VNC display port 5900 directly to Ngrok tunnel..."
-          echo "TARGET_PORT=5900" >> $GITHUB_ENV
+          # Expose via standard Remote Desktop (RDP Port 3389)
+          echo "[+] Exposing Horus OS via XRDP (Port 3389) directly to Ngrok tunnel..."
+          echo "TARGET_PORT=3389" >> $GITHUB_ENV
 
       - name: Setup Containerized Distro VPS SSH
         if: "!startsWith(inputs.windows_version, 'ubuntu') && !startsWith(inputs.windows_version, 'ubuntu2') && !endsWith(inputs.windows_version, '-gui') && !endsWith(inputs.windows_version, '-gui-ai') && inputs.windows_version != 'android-cloud' && inputs.windows_version != 'ai-dev' && inputs.windows_version != 'horus-rdp'"
