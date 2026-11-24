@@ -681,7 +681,7 @@ jobs:
           
           echo "[+] Download finished: $(ls -lh "$ISO_PATH" | awk '{print $5}')"
           
-          qemu-img create -f qcow2 /home/runner/disk.qcow2 120G
+          qemu-img create -f qcow2 /home/runner/disk.qcow2 200G
           
           sudo usermod -aG kvm runner 2>/dev/null || true
           sudo chmod 666 /dev/kvm 2>/dev/null || true
