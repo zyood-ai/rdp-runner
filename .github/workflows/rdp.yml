@@ -724,7 +724,7 @@ jobs:
           # Install QEMU as a persistent systemd service so GitHub Actions step exit can NEVER kill it
           cat << EOF | sed 's/^[ \t]*//' | sudo tee /usr/local/bin/start-horus-qemu.sh > /dev/null
           #!/bin/bash
-          exec /usr/bin/nice -n -10 /usr/bin/qemu-system-x86_64 $KVM_OPT -m $QEMU_MEM -smp cpus=$HOST_CPUS,cores=$HOST_CPUS,threads=1 -vga qxl -vnc 127.0.0.1:0,share=force-shared -cdrom "$ISO_PATH" -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio,cache=unsafe,aio=threads -boot d -netdev user,id=net0,dns=1.1.1.1 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -usb -device usb-tablet
+          exec /usr/bin/nice -n -10 /usr/bin/qemu-system-x86_64 $KVM_OPT -m $QEMU_MEM -smp cpus=$HOST_CPUS,cores=$HOST_CPUS,threads=1 -vga qxl -vnc [::1]:0,share=force-shared -cdrom "$ISO_PATH" -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio,cache=unsafe,aio=threads -boot d -netdev user,id=net0,dns=1.1.1.1 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -usb -device usb-tablet
           EOF
           sudo chmod +x /usr/local/bin/start-horus-qemu.sh
           
@@ -767,10 +767,10 @@ jobs:
             exit 1
           fi
           
-          # Verify live RFB 3.3 handshake on 127.0.0.1:5900 before exposing XRDP
-          python3 -c "import socket; s = socket.create_connection(('127.0.0.1', 5900), timeout=5); b = s.recv(12); s.sendall(b'RFB 003.003\n'); sec = int.from_bytes(s.recv(4), 'big'); s.close(); print('[+] RFB Handshake verified:', b, 'sec_type:', sec); assert sec == 1"
+          # Verify live RFB 3.3 handshake on [::1]:5900 before exposing XRDP
+          python3 -c "import socket; s = socket.create_connection(('::1', 5900), timeout=5); b = s.recv(12); s.sendall(b'RFB 003.003\n'); sec = int.from_bytes(s.recv(4), 'big'); s.close(); print('[+] RFB Handshake verified on [::1]:5900:', b, 'sec_type:', sec); assert sec == 1"
           
-          # Configure XRDP without leading spaces to bridge RDP Port 3389 straight to QEMU VNC 5900
+          # Configure XRDP without leading spaces to bridge RDP Port 3389 straight to QEMU VNC [::1]:5900
           sudo systemctl stop xrdp 2>/dev/null || true
           cat << 'EOF' | sed 's/^[ \t]*//' | sudo tee /etc/xrdp/xrdp.ini > /dev/null
           [globals]
@@ -788,7 +788,7 @@ jobs:
           [HorusOS-Desktop]
           name=HorusOS-Desktop
           lib=libvnc.so
-          ip=127.0.0.1
+          ip=::1
           port=5900
           username=na
           password=
