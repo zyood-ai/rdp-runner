@@ -696,14 +696,17 @@ jobs:
             echo "[!] KVM not accessible, using CPU emulation"
           fi
           
-          # Ramdisk cache + Ultra-low-latency QEMU engine (using /tmp to prevent AppArmor blocks)
-          echo "[+] Loading ISO directly to tmpfs RAM disk for lightning-fast disk access..."
-          RAM_DIR="/home/runner/ramdisk"
-          mkdir -p "$RAM_DIR"
-          sudo mount -t tmpfs -o size=3500M tmpfs "$RAM_DIR"
-          sudo chown -R runner:runner "$RAM_DIR"
-          cp "$ISO_PATH" "$RAM_DIR/HorusOS.iso"
-          RAM_ISO="$RAM_DIR/HorusOS.iso"
+          # Dynamic CPU & RAM sizing (prevents OOM on 7GB runners while maxing out 16GB runners)
+          TOTAL_MB=$(free -m | awk '/^Mem:/{print $2}')
+          HOST_CPUS=$(nproc)
+          if [ "$TOTAL_MB" -gt 12000 ]; then
+            QEMU_MEM=8192
+          elif [ "$TOTAL_MB" -gt 6000 ]; then
+            QEMU_MEM=$((TOTAL_MB - 2048))
+          else
+            QEMU_MEM=4096
+          fi
+          echo "[+] Runner hardware: ${HOST_CPUS} vCPUs, ${TOTAL_MB}MB RAM -> Allocating ${HOST_CPUS} vCPUs, ${QEMU_MEM}MB RAM to Horus OS"
           
           # Maximize host & guest network stack throughput & prevent idle drops
           sudo sysctl -w vm.swappiness=10
@@ -718,35 +721,54 @@ jobs:
           sudo sysctl -w net.ipv4.tcp_keepalive_intvl=10
           sudo sysctl -w net.ipv4.tcp_keepalive_probes=6
           
-          # Launch QEMU with 4 vCPUs, 8GB RAM, virtio disk, native QXL GPU & zero-password local VNC
-          nohup sudo nice -n -20 ionice -c 1 -n 0 qemu-system-x86_64 \
-            $KVM_OPT \
-            -m 8192 \
-            -smp cpus=4,cores=4,threads=1 \
-            -vga qxl \
-            -vnc 127.0.0.1:0,share=force-shared \
-            -cdrom "$RAM_ISO" \
-            -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio,cache=unsafe,aio=threads \
-            -boot d \
-            -netdev user,id=net0,dns=1.1.1.1 \
-            -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 \
-            -usb -device usb-tablet > /tmp/qemu.log 2>&1 &
+          # Install QEMU as a persistent systemd service so GitHub Actions step exit can NEVER kill it
+          cat << EOF | sed 's/^[ \t]*//' | sudo tee /usr/local/bin/start-horus-qemu.sh > /dev/null
+          #!/bin/bash
+          exec /usr/bin/nice -n -10 /usr/bin/qemu-system-x86_64 $KVM_OPT -m $QEMU_MEM -smp cpus=$HOST_CPUS,cores=$HOST_CPUS,threads=1 -vga qxl -vnc 127.0.0.1:0,share=force-shared -cdrom "$ISO_PATH" -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio,cache=unsafe,aio=threads -boot d -netdev user,id=net0,dns=1.1.1.1 -device virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56 -usb -device usb-tablet
+          EOF
+          sudo chmod +x /usr/local/bin/start-horus-qemu.sh
+          
+          cat << 'EOF' | sed 's/^[ \t]*//' | sudo tee /etc/systemd/system/horus-qemu.service > /dev/null
+          [Unit]
+          Description=Horus OS QEMU KVM Virtual Machine
+          After=network.target
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/bin/start-horus-qemu.sh
+          Restart=always
+          RestartSec=2
+          LimitNOFILE=65536
+          StandardOutput=append:/tmp/qemu.log
+          StandardError=append:/tmp/qemu.log
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          
+          sudo systemctl daemon-reload
+          sudo systemctl enable horus-qemu.service 2>/dev/null || true
+          sudo systemctl start horus-qemu.service
             
-          echo "[+] QEMU HorusOS started in background. Waiting for VNC display buffer..."
+          echo "[+] horus-qemu.service started. Waiting for VNC display buffer on 127.0.0.1:5900..."
           for i in $(seq 1 60); do
             if sudo ss -tlnp "sport = :5900" | grep -q LISTEN; then
-              echo "[+] QEMU VNC socket is LIVE on port 5900 in ${i}s!"
+              echo "[+] QEMU VNC socket is LIVE on 127.0.0.1:5900 in ${i}s!"
               break
             fi
             sleep 1
           done
-          sleep 4
+          sleep 3
           
           if ! sudo ss -tlnp "sport = :5900" | grep -q LISTEN; then
-            echo "[!] QEMU failed to start. Logs:"
-            cat /tmp/qemu.log
+            echo "[!] QEMU failed to start. Service status & logs:"
+            sudo systemctl status horus-qemu.service --no-pager || true
+            cat /tmp/qemu.log || true
             exit 1
           fi
+          
+          # Verify live RFB 3.3 handshake on 127.0.0.1:5900 before exposing XRDP
+          python3 -c "import socket; s = socket.create_connection(('127.0.0.1', 5900), timeout=5); b = s.recv(12); s.sendall(b'RFB 003.003\n'); sec = int.from_bytes(s.recv(4), 'big'); s.close(); print('[+] RFB Handshake verified:', b, 'sec_type:', sec); assert sec == 1"
           
           # Configure XRDP without leading spaces to bridge RDP Port 3389 straight to QEMU VNC 5900
           sudo systemctl stop xrdp 2>/dev/null || true
