@@ -602,6 +602,7 @@ jobs:
           echo "TARGET_PORT=22" >> $GITHUB_ENV
 
       - name: Install and Configure OpenCode AI with REA (Linux VPS & GUI)
+        if: "inputs.windows_version != 'horus-rdp'"
         continue-on-error: true
         run: |
           echo "[*] Setting up Integrated AI Environment (OpenCode + REA with Full Arabic Support)..."
