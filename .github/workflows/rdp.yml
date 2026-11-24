@@ -770,20 +770,33 @@ jobs:
           # Verify live RFB 3.3 handshake on [::1]:5900 before exposing XRDP
           python3 -c "import socket; s = socket.create_connection(('::1', 5900), timeout=5); b = s.recv(12); s.sendall(b'RFB 003.003\n'); sec = int.from_bytes(s.recv(4), 'big'); s.close(); print('[+] RFB Handshake verified on [::1]:5900:', b, 'sec_type:', sec); assert sec == 1"
           
-          # Configure XRDP without leading spaces to bridge RDP Port 3389 straight to QEMU VNC [::1]:5900
+          # Configure XRDP 0.10.1 with fork=true (prevents exit on TCP ping) bridging RDP 3389 -> QEMU VNC [::1]:5900
           sudo systemctl stop xrdp 2>/dev/null || true
           cat << 'EOF' | sed 's/^[ \t]*//' | sudo tee /etc/xrdp/xrdp.ini > /dev/null
-          [globals]
+          [Globals]
           ini_version=1
+          fork=true
+          port=3389
+          use_vsock=false
+          tcp_nodelay=true
+          tcp_keepalive=true
           bitmap_cache=true
           bitmap_compression=true
-          port=3389
-          crypt_level=none
-          channel_code=1
+          bulk_compression=true
+          use_fastpath=both
           max_bpp=24
+          crypt_level=none
           security_layer=rdp
-          ssl_protocols=
           autorun=HorusOS-Desktop
+
+          [Logging]
+          LogFile=xrdp.log
+          LogLevel=INFO
+          EnableSyslog=false
+
+          [Channels]
+          rdpdr=true
+          cliprdr=true
 
           [HorusOS-Desktop]
           name=HorusOS-Desktop
@@ -912,9 +925,15 @@ jobs:
           port="${{ env.TARGET_PORT }}"
           if [ -z "$port" ]; then port=22; fi
           while true; do
+            if [ "${{ inputs.windows_version }}" = "horus-rdp" ]; then
+              if ! pgrep -x "xrdp" > /dev/null; then
+                echo "[!] XRDP stopped. Restarting..."
+                sudo systemctl restart xrdp || true
+              fi
+            fi
             if ! pgrep -x "ngrok" > /dev/null; then
               echo "[!] Ngrok stopped. Restarting tunnel..."
               nohup ngrok tcp "$port" --region "$reg" --log=stdout > /tmp/ngrok.log 2>&1 & disown
             fi
-            sleep 60
+            sleep 30
           done
