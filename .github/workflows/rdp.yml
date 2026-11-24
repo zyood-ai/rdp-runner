@@ -717,15 +717,12 @@ jobs:
           sudo sysctl -w net.ipv4.tcp_keepalive_intvl=10
           sudo sysctl -w net.ipv4.tcp_keepalive_probes=6
           
-          # Launch QEMU with multi-queue VirtIO gigabit NIC, 1920x1080 Full HD & Cloudflare DNS
+          # Launch QEMU with multi-queue VirtIO gigabit NIC, native QXL GPU & Cloudflare DNS
           nohup sudo nice -n -20 ionice -c 1 -n 0 qemu-system-x86_64 \
             $KVM_OPT \
             -m 6144 \
             -smp cpus=2,cores=2,threads=1 \
             -vga qxl \
-            -global qxl-vga.vram_size=67108864 \
-            -global qxl-vga.xres=1920 \
-            -global qxl-vga.yres=1080 \
             -vnc 0.0.0.0:0,share=force-shared \
             -cdrom "$RAM_ISO" \
             -drive file=/home/runner/disk.qcow2,format=qcow2,if=virtio,cache=unsafe \
