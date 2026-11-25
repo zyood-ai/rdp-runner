@@ -556,6 +556,9 @@ jobs:
           exec dbus-launch --exit-with-session startxfce4
           EOF
           sudo chmod +x /etc/xrdp/startwm.sh
+          cp /etc/xrdp/startwm.sh /home/runner/.xsession
+          chmod +x /home/runner/.xsession
+          sudo chown runner:runner /home/runner/.xsession
           
           # Configure auto-login in XRDP for runner so user connects directly without grey login window!
           sudo sed -i '/^\[Xorg\]/,/^\[/ s/^username=.*/username=runner/' /etc/xrdp/xrdp.ini
@@ -663,7 +666,7 @@ jobs:
           echo "[+] Preparing Horus OS Sandstorm Live Environment..."
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            qemu-system-x86 qemu-system-modules-spice qemu-utils xrdp xorgxrdp tigervnc-viewer openbox curl aria2
+            qemu-system-x86 qemu-system-modules-spice qemu-utils xrdp xorgxrdp xserver-xorg-core dbus-x11 x11-xserver-utils tigervnc-viewer openbox curl aria2
           
           mkdir -p /home/runner/iso
           ISO_PATH="/home/runner/iso/HorusOS.iso"
@@ -787,6 +790,9 @@ jobs:
           done
           EOF
           sudo chmod +x /etc/xrdp/startwm.sh
+          cp /etc/xrdp/startwm.sh /home/runner/.xsession
+          chmod +x /home/runner/.xsession
+          sudo chown runner:runner /home/runner/.xsession
           
           sudo systemctl stop xrdp xrdp-sesman 2>/dev/null || true
           cat << 'EOF' | sed 's/^[ \t]*//' | sudo tee /etc/xrdp/xrdp.ini > /dev/null
