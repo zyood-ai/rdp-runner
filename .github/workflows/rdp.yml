@@ -663,7 +663,7 @@ jobs:
           echo "[+] Preparing Horus OS Sandstorm Live Environment..."
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            qemu-system-x86 qemu-system-modules-spice qemu-utils xrdp curl aria2
+            qemu-system-x86 qemu-system-modules-spice qemu-utils xrdp xorgxrdp tigervnc-viewer openbox curl aria2
           
           mkdir -p /home/runner/iso
           ISO_PATH="/home/runner/iso/HorusOS.iso"
@@ -770,9 +770,25 @@ jobs:
           # Verify live RFB 3.3 handshake on [::1]:5900 before exposing XRDP
           python3 -c "import socket; s = socket.create_connection(('::1', 5900), timeout=5); b = s.recv(12); s.sendall(b'RFB 003.003\n'); sec = int.from_bytes(s.recv(4), 'big'); s.close(); print('[+] RFB Handshake verified on [::1]:5900:', b, 'sec_type:', sec); assert sec == 1"
           
-          # Configure XRDP 0.10.1 with TLS negotiate (prevents Windows 11 mstsc 0x1104), fork=true & disabled_encodings_mask=1
+          # Configure native Xorg + xorgxrdp + fullscreen TigerVNC viewer (100% bypasses xrdp libvnc.so black-screen bug)
+          echo "runner:Fazah@123" | sudo chpasswd
           sudo adduser xrdp ssl-cert 2>/dev/null || true
-          sudo systemctl stop xrdp 2>/dev/null || true
+          sudo adduser runner ssl-cert 2>/dev/null || true
+          
+          cat << 'EOF' | sed 's/^[ \t]*//' | sudo tee /etc/xrdp/startwm.sh > /dev/null
+          #!/bin/bash
+          unset DBUS_SESSION_BUS_ADDRESS
+          unset XDG_RUNTIME_DIR
+          openbox &
+          sleep 0.5
+          while true; do
+            xtigervncviewer -Fullscreen=1 -Shared=1 -CompressLevel=1 -QualityLevel=8 [::1]:5900 2>/tmp/vncviewer.log || true
+            sleep 1
+          done
+          EOF
+          sudo chmod +x /etc/xrdp/startwm.sh
+          
+          sudo systemctl stop xrdp xrdp-sesman 2>/dev/null || true
           cat << 'EOF' | sed 's/^[ \t]*//' | sudo tee /etc/xrdp/xrdp.ini > /dev/null
           [Globals]
           ini_version=1
@@ -794,7 +810,7 @@ jobs:
           certificate=
           key_file=
           ssl_protocols=TLSv1.2, TLSv1.3
-          autorun=HorusOS-Desktop
+          autorun=Xorg
           hidelogwindow=true
 
           [Logging]
@@ -808,16 +824,17 @@ jobs:
           drdynvc=true
           cliprdr=true
 
-          [HorusOS-Desktop]
-          name=HorusOS-Desktop
-          lib=libvnc.so
-          ip=::1
-          port=5900
-          username=na
-          password=na
-          disabled_encodings_mask=1
+          [Xorg]
+          name=Xorg
+          lib=libxup.so
+          username=runner
+          password=Fazah@123
+          ip=127.0.0.1
+          port=-1
+          code=20
           EOF
           
+          sudo systemctl restart xrdp-sesman || true
           sudo systemctl restart xrdp || sudo service xrdp restart || true
           
           # Expose via standard Remote Desktop (RDP Port 3389)
