@@ -785,7 +785,7 @@ jobs:
           openbox &
           sleep 0.5
           while true; do
-            xtigervncviewer -FullScreen -Shared 127.0.0.1:0 2>/tmp/vncviewer.log || true
+            xtigervncviewer -FullScreen -Shared -RemoteResize=1 127.0.0.1:0 2>/tmp/vncviewer.log || true
             sleep 1
           done
           EOF
