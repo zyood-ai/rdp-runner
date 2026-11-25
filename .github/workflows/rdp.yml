@@ -770,7 +770,8 @@ jobs:
           # Verify live RFB 3.3 handshake on [::1]:5900 before exposing XRDP
           python3 -c "import socket; s = socket.create_connection(('::1', 5900), timeout=5); b = s.recv(12); s.sendall(b'RFB 003.003\n'); sec = int.from_bytes(s.recv(4), 'big'); s.close(); print('[+] RFB Handshake verified on [::1]:5900:', b, 'sec_type:', sec); assert sec == 1"
           
-          # Configure XRDP 0.10.1 with fork=true & disabled_encodings_mask=1 (prevents xrdp 0.10.1 EXTENDED_DESKTOP_SIZE SIGSEGV)
+          # Configure XRDP 0.10.1 with TLS negotiate (prevents Windows 11 mstsc 0x1104), fork=true & disabled_encodings_mask=1
+          sudo adduser xrdp ssl-cert 2>/dev/null || true
           sudo systemctl stop xrdp 2>/dev/null || true
           cat << 'EOF' | sed 's/^[ \t]*//' | sudo tee /etc/xrdp/xrdp.ini > /dev/null
           [Globals]
@@ -788,8 +789,11 @@ jobs:
           use_fastpath=both
           max_bpp=32
           new_cursors=true
-          crypt_level=none
-          security_layer=rdp
+          security_layer=negotiate
+          crypt_level=high
+          certificate=
+          key_file=
+          ssl_protocols=TLSv1.2, TLSv1.3
           autorun=HorusOS-Desktop
 
           [Logging]
